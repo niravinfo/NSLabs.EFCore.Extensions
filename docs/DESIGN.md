@@ -2,7 +2,7 @@
 
 **Batched conditional bulk update / upsert for Entity Framework Core**
 
-Status: Approved plan (pre-implementation)
+Status: In implementation — M0 done (API + translation + golden-SQL suite), M1 done (executor mechanics proven via fake ADO; live SQL Server Testcontainers suite ready, runs where Docker is available)
 Target: SQL Server first; PostgreSQL / MySQL / SQLite to follow
 
 ---

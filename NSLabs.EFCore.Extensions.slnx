@@ -4,5 +4,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit/NSLabs.EFCore.Extensions.Tests.Unit.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Integration/NSLabs.EFCore.Extensions.Tests.Integration.csproj" />
   </Folder>
 </Solution>

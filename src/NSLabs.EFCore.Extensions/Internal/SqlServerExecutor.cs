@@ -53,10 +53,7 @@ internal static class SqlServerExecutor
 
             var transaction = database.CurrentTransaction?.GetDbTransaction();
 
-            foreach (var chunk in chunks)
-            {
-                await ExecuteChunkAsync(database.GetDbConnection(), chunk, transaction, counts, options, cancellationToken).ConfigureAwait(false);
-            }
+            await ExecuteCoreAsync(database.GetDbConnection(), transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
 
             if (ownedTransaction is not null)
             {
@@ -94,7 +91,21 @@ internal static class SqlServerExecutor
         }
     }
 
-    private static async Task ExecuteChunkAsync(
+    internal static async Task ExecuteCoreAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction? transaction,
+        IReadOnlyList<SqlChunkPlan> chunks,
+        Dictionary<int, int> counts,
+        BulkExecuteOptions options,
+        CancellationToken cancellationToken)
+    {
+        foreach (var chunk in chunks)
+        {
+            await ExecuteChunkAsync(connection, chunk, transaction, counts, options, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    internal static async Task ExecuteChunkAsync(
         System.Data.Common.DbConnection connection,
         SqlChunkPlan chunk,
         System.Data.Common.DbTransaction? transaction,
