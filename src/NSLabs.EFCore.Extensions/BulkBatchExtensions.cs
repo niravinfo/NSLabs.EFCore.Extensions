@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public static class BulkBatchExtensions
 {

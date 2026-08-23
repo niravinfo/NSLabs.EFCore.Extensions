@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public sealed class UpdateOperationBuilder<TEntity> where TEntity : class
 {

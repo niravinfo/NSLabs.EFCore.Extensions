@@ -2,7 +2,7 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 
-namespace EF.Core.Extensions.Internal;
+namespace NSLabs.EFCore.Extensions.Internal;
 
 internal static class ModelBinder
 {

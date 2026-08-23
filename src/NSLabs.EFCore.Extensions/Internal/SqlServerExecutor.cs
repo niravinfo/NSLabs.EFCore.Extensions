@@ -1,9 +1,9 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using EF.Core.Extensions;
+using NSLabs.EFCore.Extensions;
 
-namespace EF.Core.Extensions.Internal;
+namespace NSLabs.EFCore.Extensions.Internal;
 
 internal static class SqlServerExecutor
 {

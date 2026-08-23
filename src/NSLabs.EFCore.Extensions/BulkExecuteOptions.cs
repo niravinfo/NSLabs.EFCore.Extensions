@@ -1,4 +1,4 @@
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public sealed class BulkExecuteOptions
 {

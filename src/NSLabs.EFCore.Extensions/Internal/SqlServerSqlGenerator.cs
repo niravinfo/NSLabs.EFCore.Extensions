@@ -1,7 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore.Metadata;
 
-namespace EF.Core.Extensions.Internal;
+namespace NSLabs.EFCore.Extensions.Internal;
 
 internal sealed record SqlParam(string Name, object? Value);
 

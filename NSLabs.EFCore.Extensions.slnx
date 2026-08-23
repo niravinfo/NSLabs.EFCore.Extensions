@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NSLabs.EFCore.Extensions/NSLabs.EFCore.Extensions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit/NSLabs.EFCore.Extensions.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore.Metadata;
 
-namespace EF.Core.Extensions.Internal;
+namespace NSLabs.EFCore.Extensions.Internal;
 
 internal abstract class SqlNode;
 

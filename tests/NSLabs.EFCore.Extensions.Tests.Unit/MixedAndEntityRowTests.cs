@@ -1,6 +1,6 @@
-using EF.Core.Extensions.Internal;
+using NSLabs.EFCore.Extensions.Internal;
 
-namespace EF.Core.Extensions.Tests.Unit;
+namespace NSLabs.EFCore.Extensions.Tests.Unit;
 
 public class MixedAndEntityRowTests
 {

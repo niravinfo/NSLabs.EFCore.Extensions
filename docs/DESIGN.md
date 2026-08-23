@@ -1,4 +1,4 @@
-# EF.Core.Extensions — Design Document
+# NSLabs.EFCore.Extensions — Design Document
 
 **Batched conditional bulk update / upsert for Entity Framework Core**
 
@@ -327,11 +327,11 @@ Guard-false semantics: row exists → leave untouched (correct).
 
 ```
 src/
-  EF.Core.Extensions/          # API, fluent builders, translation, orchestration (provider-neutral)
+  NSLabs.EFCore.Extensions/          # API, fluent builders, translation, orchestration (provider-neutral)
                                # provider strategy classes embedded (single package decision)
 tests/
-  EF.Core.Extensions.Tests.Unit/         # golden-SQL snapshots per provider
-  EF.Core.Extensions.Tests.Integration/  # Testcontainers (sqlserver, postgres, mysql) + SQLite in-memory
+  NSLabs.EFCore.Extensions.Tests.Unit/         # golden-SQL snapshots per provider
+  NSLabs.EFCore.Extensions.Tests.Integration/  # Testcontainers (sqlserver, postgres, mysql) + SQLite in-memory
 samples/
 ```
 
@@ -357,7 +357,7 @@ samples/
 | First provider | SQL Server |
 | API styles | Both (expression + entity) |
 | Per-op affected counts | Yes for SQL Server v1 (same round trip); capability flag per provider |
-| Packaging | One package (`EF.Core.Extensions`), all providers embedded |
-| NuGet id / namespace | `EF.Core.Extensions` |
+| Packaging | One package (`NSLabs.EFCore.Extensions`), all providers embedded |
+| NuGet id / namespace | `NSLabs.EFCore.Extensions` |
 | Entry points | `db.BulkExecuteAsync(...)` inline; `db.CreateBulkBatch()` deferred builder (accumulate anywhere, execute once); `db.Items.BulkUpdateAsync/BulkUpsertAsync` as single-table sugar |
 | Multi-table batching | Yes — one round trip + one transaction across all operations; submission order defines execution and FK-safe sequencing |

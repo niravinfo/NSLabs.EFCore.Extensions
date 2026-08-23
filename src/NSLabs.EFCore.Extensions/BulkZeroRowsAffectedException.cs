@@ -1,4 +1,4 @@
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public sealed class BulkZeroRowsAffectedException(int operationIndex, string entityType)
     : InvalidOperationException($"Bulk operation #{operationIndex} targeting '{entityType}' affected 0 rows.")

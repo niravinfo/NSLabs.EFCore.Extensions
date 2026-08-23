@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace EF.Core.Extensions.Tests.Unit;
+namespace NSLabs.EFCore.Extensions.Tests.Unit;
 
 public enum OrderStatus
 {

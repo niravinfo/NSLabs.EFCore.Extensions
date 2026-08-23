@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\EF.Core.Extensions\EF.Core.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
   </ItemGroup>
 
 </Project>

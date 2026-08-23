@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <RootNamespace>EF.Core.Extensions</RootNamespace>
+    <RootNamespace>NSLabs.EFCore.Extensions</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="EF.Core.Extensions.Tests.Unit" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit" />
   </ItemGroup>
 
 </Project>

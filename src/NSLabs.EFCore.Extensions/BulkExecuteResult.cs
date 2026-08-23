@@ -1,4 +1,4 @@
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public sealed record OperationResult(string EntityType, int RowsAffected);
 

@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 
-namespace EF.Core.Extensions.Internal;
+namespace NSLabs.EFCore.Extensions.Internal;
 
 internal sealed class ParameterReplacer(ParameterExpression source, Expression replacement) : ExpressionVisitor
 {

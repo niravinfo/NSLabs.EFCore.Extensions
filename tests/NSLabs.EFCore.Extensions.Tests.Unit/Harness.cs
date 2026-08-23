@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
-using EF.Core.Extensions.Internal;
+using NSLabs.EFCore.Extensions.Internal;
 
-namespace EF.Core.Extensions.Tests.Unit;
+namespace NSLabs.EFCore.Extensions.Tests.Unit;
 
 internal static class Harness
 {

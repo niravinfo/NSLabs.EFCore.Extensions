@@ -1,9 +1,9 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
-using EF.Core.Extensions.Internal;
+using NSLabs.EFCore.Extensions.Internal;
 
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public sealed class BulkBatch(DbContext context) : IBulkBatch
 {

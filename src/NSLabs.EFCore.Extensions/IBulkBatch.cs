@@ -1,6 +1,6 @@
 using System.Linq.Expressions;
 
-namespace EF.Core.Extensions;
+namespace NSLabs.EFCore.Extensions;
 
 public interface IBulkBatch
 {
