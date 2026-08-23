@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EF.Core.Extensions/EF.Core.Extensions.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EF.Core.Extensions.Tests.Unit/EF.Core.Extensions.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

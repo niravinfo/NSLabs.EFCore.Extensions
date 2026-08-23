@@ -1,0 +1,55 @@
+# Default: normalize all text files to LF in the repository and on checkout
+* text=auto eol=lf
+
+# Source code (explicit)
+*.cs            text eol=lf diff=csharp
+*.csx           text eol=lf diff=csharp
+*.razor         text eol=lf
+*.cshtml        text eol=lf
+*.sql           text eol=lf
+
+# Project and solution files
+*.sln           text eol=lf
+*.slnx           text eol=lf
+*.csproj        text eol=lf
+*.props         text eol=lf
+*.targets       text eol=lf
+*.config        text eol=lf
+
+# Structured data / config
+*.json          text eol=lf
+*.jsonc         text eol=lf
+*.xml           text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+
+# Documentation
+*.md            text eol=lf
+*.txt           text eol=lf
+*.editorconfig  text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
+
+# Shell scripts must be LF even on Windows checkouts
+*.sh            text eol=lf
+*.bash          text eol=lf
+
+# Windows scripts keep CRLF (required by cmd/PowerShell conventions)
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binaries - never touch
+*.dll           binary
+*.exe           binary
+*.pdb           binary
+*.snk           binary
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.ico           binary
+*.woff          binary
+*.woff2         binary
+*.ttf           binary
+*.eot           binary

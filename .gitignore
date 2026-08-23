@@ -1,0 +1,151 @@
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio cache/options
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# Rider
+*.sln.iml
+
+# Mono / *NIX auto-generated
+mono_crash.*
+
+# Build results (MSBuild)
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Oo]ut/
+Bin/
+Obj/
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# Visual Studio 2015+ cache/options directory
+.dotnet/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# NuGet v3 restore artifacts
+[Pp]ackages.dg
+
+# Publish output
+[Pp]ublish/
+publish/
+*.pubxml.user
+PublishProfiles/
+
+# Test results
+[Tt]est[Rr]esult*/
+TestResults/
+[Dd]ebugPS/
+*.coverage
+*.coveragexml
+coverage.json
+coverage.opencover.xml
+coveragereport/
+
+# Code analysis / coverage tools
+BenchmarkDotNet.Artifacts/
+AXCover/
+TestCoverage/
+
+# ReSharper / Rider / CodeRush
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+_JavaScriptSharper/
+*.dotCover
+
+# Others
+ClientBin/
+~$*
+*~
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+*.pfx
+*.publishsettings
+orleans.codegen.cs
+
+# EF Core migrations design-time artifacts (keep migrations, ignore temp)
+efpt.*.json.bak
+
+# SQL Server project files
+*.rdl.data
+*.bim.layout
+*.bim_*.settings
+*.rptproj.rsuser
+*- [Bb]ackup.rdl
+*- [Bb]ackup ([0-9]).rdl
+*- [Bb]ackup ([0-9][0-9]).rdl
+
+# Windows Installer files from build
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+
+# Azure / cloud credentials - never commit
+*.publish.xml
+*.azurePubxml
+secrets.json
+appsettings.secrets.json
+*.pem
+
+# Local databases
+*.mdf
+*.ldf
+*.ndf
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+
+# Node (if tooling ever needs it)
+node_modules/
+
+# OS junk
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files
+*.tmp
+*.log
+*.tlog
+*.swp
+*.*~
+
+# Docker override files
+docker-compose.override.yml
