@@ -16,13 +16,26 @@ internal sealed class BoundAssignment
     public required object? Value { get; init; }
 }
 
+internal sealed class BoundUpsertRow
+{
+    public required IReadOnlyList<BoundAssignment> InsertValues { get; init; }
+
+    public required IReadOnlyList<object?> KeyValues { get; init; }
+}
+
 internal sealed class BoundUpsertSpec
 {
-    public List<IProperty>? ConflictProperties { get; set; }
+    public required List<IProperty> ConflictProperties { get; init; }
+
+    /// <summary>All columns carried in the MERGE source, in emission order.</summary>
+    public required List<IProperty> InsertColumns { get; init; }
+
+    /// <summary>Columns written on match when no explicit Set(...) payload exists.</summary>
+    public required List<IProperty> UpdateColumns { get; init; }
 
     public SqlNode? Guard { get; set; }
 
-    public int RowCount { get; set; }
+    public List<BoundUpsertRow> Rows { get; } = [];
 }
 
 internal sealed class BoundOperation

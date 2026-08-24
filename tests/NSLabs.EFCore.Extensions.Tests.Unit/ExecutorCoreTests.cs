@@ -96,6 +96,34 @@ public class ExecutorCoreTests
     }
 
     [Fact]
+    public async Task Counts_for_operation_split_across_chunks_are_accumulated()
+    {
+        var connection = new FakeAdo.Connection();
+        var counts = new Dictionary<int, int>();
+        var chunks = new List<EF.SqlChunkPlan>
+        {
+            new()
+            {
+                CommandText = "MERGE chunk 1",
+                Parameters = [],
+                OperationIndices = [0]
+            },
+            new()
+            {
+                CommandText = "MERGE chunk 2",
+                Parameters = [],
+                OperationIndices = [0]
+            }
+        };
+
+        ScriptRowCounts(connection, [2], [5]);
+
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+
+        Assert.Equal(7, counts[0]);
+    }
+
+    [Fact]
     public async Task Reader_failure_propagates_after_partial_chunks()
     {
         var (connection, chunks, counts) = Arrange();

@@ -64,6 +64,8 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             return BulkExecuteResult.Empty;
         }
 
+        ValidateUniqueUpsertKeys(_operations);
+
         var providerName = _context.Database.ProviderName;
         if (!string.Equals(providerName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
         {
@@ -92,6 +94,61 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             TotalRowsAffected = counts.Values.Sum(),
             Operations = operationResults
         };
+    }
+
+    internal static void ValidateUniqueUpsertKeys(IReadOnlyList<BoundOperation> operations)
+    {
+        var buckets = new Dictionary<(string Table, string Shape), Dictionary<UpsertKey, (int OpIndex, int RowIndex)>>();
+
+        foreach (var operation in operations)
+        {
+            if (operation.Kind != BulkOperationKind.Upsert || operation.UpsertSpec is not { } spec)
+            {
+                continue;
+            }
+
+            var table = operation.EntityType.GetTableName() ?? operation.EntityType.DisplayName();
+            var shape = string.Join("|", spec.ConflictProperties.Select(p => p.Name));
+            var bucket = buckets.TryGetValue((table, shape), out var existing)
+                ? existing
+                : buckets[(table, shape)] = [];
+
+            for (var rowIndex = 0; rowIndex < spec.Rows.Count; rowIndex++)
+            {
+                var key = new UpsertKey(spec.Rows[rowIndex].KeyValues);                if (bucket.TryGetValue(key, out var collision))
+                {
+                    throw new InvalidOperationException(
+                        $"Duplicate upsert match-key on '{table}' between operation #{collision.OpIndex} (row {collision.RowIndex}) " +
+                        $"and operation #{operation.GlobalIndex} (row {rowIndex}). SQL Server MERGE cannot affect the same row twice in one batch.");
+                }
+
+                bucket[key] = (operation.GlobalIndex, rowIndex);
+            }
+        }
+    }
+
+    private sealed class UpsertKey(IReadOnlyList<object?> values)
+    {
+        private readonly IReadOnlyList<object?> _values = values;
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                var hash = 17;
+                foreach (var value in _values)
+                {
+                    hash = hash * 31 + (value?.GetHashCode() ?? 0);
+                }
+
+                return hash;
+            }
+        }
+
+        public override bool Equals(object? obj)
+            => obj is UpsertKey other
+               && _values.Count == other._values.Count
+               && _values.SequenceEqual(other._values, EqualityComparer<object?>.Default);
     }
 
     private BoundOperation BindUpdate<TEntity>(UpdateOperationBuilder<TEntity> builder) where TEntity : class
@@ -141,21 +198,98 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         var entityType = ModelBinder.ResolveEntityType<TEntity>(_context.Model);
         var operation = CreateOperation(BulkOperationKind.Upsert, entityType);
 
-        var spec = new BoundUpsertSpec { RowCount = builder.Rows.Count };
+        var conflictProperties = builder.ConflictTarget is not null
+            ? ResolveConflictProperties(builder.ConflictTarget, entityType)
+            : entityType.FindPrimaryKey()?.Properties.ToList()
+              ?? throw new InvalidOperationException(
+                  $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' requires On(...) because the entity has no primary key.");
 
-        if (builder.ConflictTarget is not null)
+        var discriminator = entityType.FindDiscriminatorProperty();
+        object? discriminatorValue = null;
+        if (discriminator is not null)
         {
-            spec.ConflictProperties = ResolveConflictProperties(builder.ConflictTarget, entityType);
+            discriminatorValue = entityType.GetDiscriminatorValue()
+                ?? throw new InvalidOperationException(
+                    $"Entity '{entityType.DisplayName()}' has a discriminator but no concrete discriminator value; upsert requires a leaf entity type.");
         }
+
+        var insertColumns = new List<IProperty>(conflictProperties);
+        foreach (var property in entityType.GetProperties())
+        {
+            if (!ModelBinder.IsBindableScalar(property) || insertColumns.Contains(property))
+            {
+                continue;
+            }
+
+            insertColumns.Add(property);
+        }
+
+        if (discriminator is not null && !insertColumns.Contains(discriminator))
+        {
+            insertColumns.Add(discriminator);
+        }
+
+        foreach (var (selector, value) in builder.Sets)
+        {
+            var property = ModelBinder.ResolveSelector(selector, entityType);
+            if (conflictProperties.Contains(property))
+            {
+                throw new InvalidOperationException(
+                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': Set(...) cannot target conflict column '{property.Name}'.");
+            }
+
+            operation.Assignments.Add(ModelBinder.CreateAssignment(property, value));
+        }
+
+        // Explicit Set(...) values form the matched-update payload; otherwise the full row
+        // (minus conflict and generated columns) is written back, mirroring entity-style updates.
+        var updateColumns = builder.Sets.Count > 0
+            ? []
+            : insertColumns.Where(column => ModelBinder.IsBindableScalar(column) && !conflictProperties.Contains(column)).ToList();
+
+        var hasMatchedUpdatePayload = builder.Sets.Count > 0 || updateColumns.Count > 0;
+
+        var spec = new BoundUpsertSpec
+        {
+            ConflictProperties = conflictProperties,
+            InsertColumns = insertColumns,
+            UpdateColumns = updateColumns
+        };
 
         if (builder.Guard is not null)
         {
+            if (!hasMatchedUpdatePayload)
+            {
+                throw new InvalidOperationException(
+                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': WhenMatched(...) guards the matched update, but there is nothing to update; add Set(...) or non-key columns.");
+            }
+
             spec.Guard = LinqPredicateTranslator.Translate(builder.Guard, entityType, builder.Guard.Parameters[0]);
         }
 
-        foreach (var (selector, _) in builder.Sets)
+        foreach (var row in builder.Rows)
         {
-            ModelBinder.EnsureWritable(ModelBinder.ResolveSelector(selector, entityType));
+            var insertValues = new List<BoundAssignment>(insertColumns.Count);
+            foreach (var property in insertColumns)
+            {
+                var raw = ReferenceEquals(property, discriminator)
+                    ? discriminatorValue
+                    : ModelBinder.ReadMemberValue(property, row!);
+
+                insertValues.Add(new BoundAssignment
+                {
+                    Property = property,
+                    Value = ModelBinder.ConvertToProvider(property, raw)
+                });
+            }
+
+            var keyValues = new object?[conflictProperties.Count];
+            for (var i = 0; i < conflictProperties.Count; i++)
+            {
+                keyValues[i] = insertValues.First(assignment => ReferenceEquals(assignment.Property, conflictProperties[i])).Value;
+            }
+
+            spec.Rows.Add(new BoundUpsertRow { InsertValues = insertValues, KeyValues = keyValues });
         }
 
         operation.UpsertSpec = spec;

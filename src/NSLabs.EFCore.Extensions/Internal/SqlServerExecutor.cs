@@ -150,7 +150,11 @@ internal static class SqlServerExecutor
 
         for (var k = 0; k < chunk.OperationIndices.Count; k++)
         {
-            counts[chunk.OperationIndices[k]] = reader.GetInt32(k);
+            var index = chunk.OperationIndices[k];
+            var affected = reader.GetInt32(k);
+
+            // An operation split across chunks accumulates its rowcount.
+            counts[index] = counts.TryGetValue(index, out var existing) ? existing + affected : affected;
         }
     }
 }
