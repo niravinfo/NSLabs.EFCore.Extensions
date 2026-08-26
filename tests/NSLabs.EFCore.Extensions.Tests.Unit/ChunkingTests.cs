@@ -55,12 +55,10 @@ public class ChunkingTests
             b => b.Update<Item>(op =>
             {
                 op.Where(x => x.Id == 1);
-                for (var i = 0; i < 11; i++)
-                {
-                    op.Set(x => x.Key1, "v");
-                }
+                op.Set(x => x.Key1, "v");
+                op.Set(x => x.Key2, 7);
             }),
-            new BulkExecuteOptions { MaxParametersPerCommand = 10 }));
+            new BulkExecuteOptions { MaxParametersPerCommand = 2 }));
 
         Assert.Contains("exceeds MaxParametersPerCommand", ex.Message);
     }

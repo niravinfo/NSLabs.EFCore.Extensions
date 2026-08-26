@@ -98,6 +98,39 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
     }
 
     [SkippableFact]
+    public async Task Composite_conflict_target_matches_all_columns_before_updating()
+    {
+        RequireDatabase();
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            seed.Items.Add(new Item { Id = 9701, Key1 = "dup", Key2 = 1, Key3 = 0 });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var context = Fixture.CreateContext())
+        {
+            var result = await context.Items.BulkUpsertAsync(b => b
+                .Add(u => u
+                    .On(x => new { x.Key1, x.Key2 })
+                    .Values(new[]
+                    {
+                        // (Key1="dup", Key2=1) exists: takes the update path.
+                        new Item { Id = 9701, Key1 = "dup", Key2 = 1, Key3 = 42 },
+                        // Shares Key1="dup" but Key2=2 differs: must take the insert path,
+                        // proving the ON clause requires every conflict column to match.
+                        new Item { Id = 9702, Key1 = "dup", Key2 = 2, Key3 = 7 }
+                    })));
+
+            Assert.Equal(2, result.TotalRowsAffected);
+        }
+
+        await using var verify = Fixture.CreateContext();
+        Assert.Equal(42, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 9701)).Key3);
+        Assert.Equal(7, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 9702)).Key3);
+    }
+
+    [SkippableFact]
     public async Task Guard_blocks_matched_update_but_not_insert()
     {
         RequireDatabase();
@@ -115,9 +148,11 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
             var result = await context.Customers.BulkUpsertAsync(b =>
             {
                 b.Add(op => op
+                    .On(x => x.Code)
                     .WhenMatched(x => !x.Active)
                     .Values(new Customer { Code = guardedCode, Name = "Overwritten" }));
                 b.Add(op => op
+                    .On(x => x.Code)
                     .WhenMatched(x => !x.Active)
                     .Values(new Customer { Code = "UP-9531", Name = "FreshRow" }));
             });

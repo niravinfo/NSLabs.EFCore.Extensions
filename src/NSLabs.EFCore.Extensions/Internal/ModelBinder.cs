@@ -117,6 +117,15 @@ internal static class ModelBinder
            && !property.IsPrimaryKey()
            && property.ValueGenerated == ValueGenerated.Never;
 
+    /// <summary>
+    /// Like <see cref="IsBindableScalar"/>, but allows primary keys. Used for upsert
+    /// INSERT column lists where a non-store-generated key must be written explicitly.
+    /// </summary>
+    public static bool IsInsertBindable(IProperty property)
+        => !property.IsShadowProperty()
+           && property.PropertyInfo is not null
+           && property.ValueGenerated == ValueGenerated.Never;
+
     private static IProperty ResolvePropertyOrThrow(MemberExpression member, IEntityType entityType)
         => entityType.FindProperty(member.Member)
            ?? entityType.FindProperty(member.Member.Name)

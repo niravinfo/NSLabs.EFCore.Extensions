@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Testcontainers.MsSql;
 
 namespace NSLabs.EFCore.Extensions.Tests.Integration;
@@ -43,7 +44,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
             .UseSqlServer(ConnectionString)
             .Options;
 
-        return new TestDbContext(options);
+        return new IntegrationTestDbContext(options);
     }
 
     public async Task DisposeAsync()
@@ -53,6 +54,26 @@ public sealed class SqlServerFixture : IAsyncLifetime
             await _container.DisposeAsync();
             _container = null;
         }
+    }
+}
+
+/// <summary>
+/// Integration variant of the shared test model. Integration tests seed deterministic
+/// explicit IDs, so identity generation is disabled for keys that are always assigned
+/// explicitly (Customer.Id stays an identity column because upsert tests rely on it).
+/// </summary>
+public sealed class IntegrationTestDbContext(DbContextOptions<TestDbContext> options) : TestDbContext(options)
+{
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<Item>().Property(x => x.Id).ValueGeneratedNever()
+            .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.None);
+        modelBuilder.Entity<AuditLog>().Property(x => x.Id).ValueGeneratedNever()
+            .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.None);
+        modelBuilder.Entity<Pet>().Property(x => x.PetId).ValueGeneratedNever()
+            .HasAnnotation("SqlServer:ValueGenerationStrategy", SqlServerValueGenerationStrategy.None);
     }
 }
 

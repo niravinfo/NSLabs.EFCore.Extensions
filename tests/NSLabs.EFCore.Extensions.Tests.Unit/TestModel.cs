@@ -74,7 +74,7 @@ public class Dog : Pet
     public string Breed { get; set; } = "";
 }
 
-public sealed class TestDbContext : DbContext
+public class TestDbContext : DbContext
 {
     public TestDbContext()
     {

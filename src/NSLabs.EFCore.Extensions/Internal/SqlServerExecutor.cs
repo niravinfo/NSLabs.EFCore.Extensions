@@ -10,6 +10,7 @@ internal static class SqlServerExecutor
     public static Task<Dictionary<int, int>> ExecuteAsync(
         DbContext context,
         IReadOnlyList<SqlChunkPlan> chunks,
+        IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
         CancellationToken cancellationToken)
     {
@@ -17,7 +18,7 @@ internal static class SqlServerExecutor
 
         if (database.CurrentTransaction is not null)
         {
-            return RunAsync(context, chunks, options, ownTransaction: false, closeConnection: false, cancellationToken);
+            return RunAsync(context, chunks, operations, options, ownTransaction: false, closeConnection: false, cancellationToken);
         }
 
         var strategy = database.CreateExecutionStrategy();
@@ -25,15 +26,16 @@ internal static class SqlServerExecutor
         if (strategy.RetriesOnFailure)
         {
             return strategy.ExecuteAsync(
-                () => RunAsync(context, chunks, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken));
+                () => RunAsync(context, chunks, operations, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken));
         }
 
-        return RunAsync(context, chunks, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken);
+        return RunAsync(context, chunks, operations, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken);
     }
 
     private static async Task<Dictionary<int, int>> RunAsync(
         DbContext context,
         IReadOnlyList<SqlChunkPlan> chunks,
+        IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
         bool ownTransaction,
         bool closeConnection,
@@ -54,6 +56,19 @@ internal static class SqlServerExecutor
             var transaction = database.CurrentTransaction?.GetDbTransaction();
 
             await ExecuteCoreAsync(database.GetDbConnection(), transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
+
+            // Validate zero-row operations while the transaction is still open so the
+            // entire batch can be rolled back instead of partially committed.
+            if (options.ThrowIfZeroAffected)
+            {
+                foreach (var operation in operations)
+                {
+                    if (counts.TryGetValue(operation.GlobalIndex, out var affected) && affected == 0)
+                    {
+                        throw new BulkZeroRowsAffectedException(operation.GlobalIndex, operation.EntityType.DisplayName());
+                    }
+                }
+            }
 
             if (ownedTransaction is not null)
             {

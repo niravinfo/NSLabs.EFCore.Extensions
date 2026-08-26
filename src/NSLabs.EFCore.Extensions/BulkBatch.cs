@@ -74,16 +74,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         }
 
         var chunks = SqlServerSqlGenerator.Generate(_operations, options.MaxParametersPerCommand);
-        var counts = await SqlServerExecutor.ExecuteAsync(_context, chunks, options, cancellationToken).ConfigureAwait(false);
-
-        if (options.ThrowIfZeroAffected)
-        {
-            var zero = _operations.FirstOrDefault(op => counts.TryGetValue(op.GlobalIndex, out var affected) && affected == 0);
-            if (zero is not null)
-            {
-                throw new BulkZeroRowsAffectedException(zero.GlobalIndex, zero.EntityType.DisplayName());
-            }
-        }
+        var counts = await SqlServerExecutor.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
 
         var operationResults = _operations
             .Select(op => new OperationResult(op.EntityType.DisplayName(), counts.GetValueOrDefault(op.GlobalIndex)))
@@ -163,9 +154,17 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
         operation.PredicateParts.Add(LinqPredicateTranslator.Translate(builder.Predicate, entityType, builder.Predicate.Parameters[0]));
 
+        var assignedUpdateColumns = new HashSet<IProperty>();
         foreach (var (selector, value) in builder.Sets)
         {
             var property = ModelBinder.ResolveSelector(selector, entityType);
+            if (!assignedUpdateColumns.Add(property))
+            {
+                throw new InvalidOperationException(
+                    $"Update operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' assigns '{property.Name}' more than once; " +
+                    "combine the calls into a single Set(...) per column.");
+            }
+
             operation.Assignments.Add(ModelBinder.CreateAssignment(property, value));
         }
 
@@ -216,7 +215,9 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         var insertColumns = new List<IProperty>(conflictProperties);
         foreach (var property in entityType.GetProperties())
         {
-            if (!ModelBinder.IsBindableScalar(property) || insertColumns.Contains(property))
+            // Insert columns allow non-store-generated primary keys (natural-key upserts);
+            // store-generated columns (identity/computed) are always database-managed.
+            if (!ModelBinder.IsInsertBindable(property) || insertColumns.Contains(property))
             {
                 continue;
             }
@@ -229,6 +230,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             insertColumns.Add(discriminator);
         }
 
+        var assignedUpsertColumns = new HashSet<IProperty>();
         foreach (var (selector, value) in builder.Sets)
         {
             var property = ModelBinder.ResolveSelector(selector, entityType);
@@ -236,6 +238,13 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             {
                 throw new InvalidOperationException(
                     $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': Set(...) cannot target conflict column '{property.Name}'.");
+            }
+
+            if (!assignedUpsertColumns.Add(property))
+            {
+                throw new InvalidOperationException(
+                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' assigns '{property.Name}' more than once; " +
+                    "combine the calls into a single Set(...) per column.");
             }
 
             operation.Assignments.Add(ModelBinder.CreateAssignment(property, value));

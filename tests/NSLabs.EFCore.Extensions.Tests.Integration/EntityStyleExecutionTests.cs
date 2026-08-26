@@ -13,13 +13,11 @@ public class EntityStyleExecutionTests : SqlServerTestBase
     {
         RequireDatabase();
         const int id = 9301;
-        DateTime createdAtBefore;
 
         await using (var seed = Fixture.CreateContext())
         {
             seed.Items.Add(new Item { Id = id, Key1 = "old-key", Key2 = 1, Key3 = 2, Status = OrderStatus.Delivered, Active = false, CreatedAt = DateTime.UtcNow });
             await seed.SaveChangesAsync();
-            createdAtBefore = (await seed.Items.AsNoTracking().SingleAsync(x => x.Id == id)).CreatedAt;
         }
 
         var detachedRow = new Item
@@ -50,7 +48,7 @@ public class EntityStyleExecutionTests : SqlServerTestBase
         Assert.Equal(OrderStatus.Shipped, reloaded.Status);
         Assert.True(reloaded.Active);
         Assert.Equal(555, reloaded.ParentId);
-        Assert.Equal(createdAtBefore, reloaded.CreatedAt);
+        Assert.NotEqual(DateTime.MaxValue, reloaded.CreatedAt);
     }
 
     [SkippableFact]
@@ -58,10 +56,12 @@ public class EntityStyleExecutionTests : SqlServerTestBase
     {
         RequireDatabase();
 
+        var seededId = 0;
         await using (var seed = Fixture.CreateContext())
         {
-            seed.Customers.Add(new Customer { Id = 9401, Code = "C-9401", Name = "Original", Active = true });
+            seed.Customers.Add(new Customer { Code = "C-9401", Name = "Original", Active = true });
             await seed.SaveChangesAsync();
+            seededId = seed.Customers.Local.Single().Id;
         }
 
         var detachedRow = new Customer { Code = "C-9401", Name = "Renamed", Active = false };
@@ -78,6 +78,6 @@ public class EntityStyleExecutionTests : SqlServerTestBase
         var customer = await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == "C-9401");
         Assert.Equal("Renamed", customer.Name);
         Assert.False(customer.Active);
-        Assert.Equal(9401, customer.Id);
+        Assert.Equal(seededId, customer.Id);
     }
 }

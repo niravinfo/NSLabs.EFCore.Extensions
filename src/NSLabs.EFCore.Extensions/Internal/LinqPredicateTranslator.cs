@@ -24,6 +24,8 @@ internal static class LinqPredicateTranslator
                 NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked or ExpressionType.TypeAs
             } convert => TranslateConverted(convert, entityType, entityParameter),
             BinaryExpression binary => TranslateBinary(binary, entityType, entityParameter),
+            _ when !ReferencesEntity(node, entityParameter) =>
+                new SqlParameterNode(Evaluate(node)),
             _ => throw new NotSupportedException($"Predicate construct '{node.NodeType}' is not supported. Node: '{node}'.")
         };
 
@@ -109,6 +111,11 @@ internal static class LinqPredicateTranslator
                 return new SqlBinaryNode(SqlBinaryOperator.Or, AsBooleanPredicate(left), AsBooleanPredicate(right));
 
             default:
+                if (!ReferencesEntity(node, entityParameter))
+                {
+                    return new SqlParameterNode(Evaluate(node));
+                }
+
                 throw new NotSupportedException($"Binary operator '{node.NodeType}' is not supported in predicates.");
         }
     }
@@ -131,6 +138,25 @@ internal static class LinqPredicateTranslator
 
         throw new NotSupportedException($"Member access on '{member.Expression?.NodeType}' is not supported in predicates.");
     }
+
+    private static bool ReferencesEntity(Expression node, ParameterExpression entityParameter)
+        => node switch
+        {
+            ParameterExpression parameter => ReferenceEquals(parameter, entityParameter),
+            MemberExpression { Expression: not null } member => ReferencesEntity(member.Expression, entityParameter),
+            UnaryExpression unary => ReferencesEntity(unary.Operand, entityParameter),
+            BinaryExpression binary => ReferencesEntity(binary.Left, entityParameter)
+                                       || ReferencesEntity(binary.Right, entityParameter),
+            MethodCallExpression call => call.Object is { } target && ReferencesEntity(target, entityParameter)
+                                         || call.Arguments.Any(argument => ReferencesEntity(argument, entityParameter)),
+            InvocationExpression invocation => ReferencesEntity(invocation.Expression, entityParameter)
+                                               || invocation.Arguments.Any(argument => ReferencesEntity(argument, entityParameter)),
+            ConditionalExpression conditional => ReferencesEntity(conditional.Test, entityParameter)
+                                                 || ReferencesEntity(conditional.IfTrue, entityParameter)
+                                                 || ReferencesEntity(conditional.IfFalse, entityParameter),
+            NewArrayExpression newArray => newArray.Expressions.Any(expression => ReferencesEntity(expression, entityParameter)),
+            _ => false
+        };
 
     private static IProperty ResolveProperty(MemberExpression member, IEntityType entityType)
         => entityType.FindProperty(member.Member)

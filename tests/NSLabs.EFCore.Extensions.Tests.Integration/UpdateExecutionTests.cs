@@ -128,6 +128,265 @@ public class UpdateExecutionTests : SqlServerTestBase
     }
 
     [SkippableFact]
+    public async Task Same_table_updates_with_different_filters_apply_independently()
+    {
+        RequireDatabase();
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            // Shared database across tests; clear stray Items so row counts are exact.
+            await seed.Items.ExecuteDeleteAsync();
+            seed.Items.Add(new Item { Id = 9801, Key1 = "alpha", Key2 = 0, Key3 = 0, Status = OrderStatus.Pending, Active = false });
+            seed.Items.Add(new Item { Id = 9802, Key1 = "beta", Key2 = 0, Key3 = 0, Status = OrderStatus.Pending, Active = true });
+            seed.Items.Add(new Item { Id = 9803, Key1 = "gamma", Key2 = 0, Key3 = 0, Status = OrderStatus.Shipped, Active = false });
+            await seed.SaveChangesAsync();
+        }
+
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            // Three operations against Items, each with its own predicate shape and its own
+            // partial column payload, executed sequentially in user order.
+            result = await context.BulkExecuteAsync(b =>
+            {
+                b.Update<Item>(op => op.Where(x => x.Key1 == "alpha").Set(x => x.Key3, 11));
+                b.Update<Item>(op => op.Where(x => x.Status == OrderStatus.Shipped).Set(x => x.Key2, 22));
+                b.Update<Item>(op => op.Where(x => !x.Active).Set(x => x.Key1, "delta"));
+            });
+        }
+
+        Assert.Equal(3, result.Operations.Count);
+        Assert.Equal(1, result.Operations[0].RowsAffected);
+        Assert.Equal(1, result.Operations[1].RowsAffected);
+        Assert.Equal(2, result.Operations[2].RowsAffected);
+        Assert.Equal(4, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+        var items = await verify.Items.AsNoTracking().Where(x => x.Id >= 9801 && x.Id <= 9803).ToDictionaryAsync(x => x.Id);
+
+        // 9801: matched op #0 (Key3) and op #2 (Key1).
+        Assert.Equal(11, items[9801].Key3);
+        Assert.Equal("delta", items[9801].Key1);
+        Assert.Equal(0, items[9801].Key2);
+
+        // 9802: active and pending, matched nothing.
+        Assert.Equal("beta", items[9802].Key1);
+        Assert.Equal(0, items[9802].Key2);
+        Assert.Equal(0, items[9802].Key3);
+
+        // 9803: matched op #1 (shipped), then op #2 (inactive).
+        Assert.Equal(22, items[9803].Key2);
+        Assert.Equal("delta", items[9803].Key1);
+        Assert.Equal(0, items[9803].Key3);
+    }
+
+    [SkippableFact]
+    public async Task Set_assignments_can_be_added_dynamically_with_control_flow()
+    {
+        RequireDatabase();
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            await seed.Items.ExecuteDeleteAsync();
+            seed.Items.Add(new Item { Id = 9901, Key1 = "before", Key2 = 0, Key3 = 0 });
+            await seed.SaveChangesAsync();
+        }
+
+        var applyRename = true;
+        var applySkipColumn = false;
+        var increments = new[] { 5, 10 };
+
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            // The configure delegate is ordinary C#: if/else and foreach decide which
+            // Set(...) calls run; values are captured at call time.
+            result = await context.BulkExecuteAsync(b => b
+                .Update<Item>(op =>
+                {
+                    op.Where(x => x.Id == 9901);
+
+                    if (applyRename)
+                    {
+                        op.Set(x => x.Key1, "after");
+                    }
+
+                    if (applySkipColumn)
+                    {
+                        op.Set(x => x.Key3, 999);
+                    }
+
+                    // A column may only be assigned once per operation, so aggregate
+                    // inside the loop and issue a single Set(...) per column.
+                    var total = 0;
+                    foreach (var increment in increments)
+                    {
+                        total += increment;
+                    }
+
+                    op.Set(x => x.Key2, total);
+                }));
+        }
+
+        Assert.Equal(1, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+        var item = await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 9901);
+        Assert.Equal("after", item.Key1);
+        Assert.Equal(15, item.Key2);
+        Assert.Equal(0, item.Key3);
+
+        // Duplicate Set(...) on the same column fails fast with a clear error instead of
+        // a SQL Server "column specified more than once" exception at execution time.
+        await using var assertContext = Fixture.CreateContext();
+        var duplicate = await Assert.ThrowsAsync<InvalidOperationException>(() => assertContext.BulkExecuteAsync(b => b
+            .Update<Item>(op =>
+            {
+                op.Where(x => x.Id == 9901);
+                op.Set(x => x.Key1, "first");
+                op.Set(x => x.Key1, "second");
+            })));
+
+        Assert.Contains("'Key1' more than once", duplicate.Message);
+    }
+
+    [SkippableFact]
+    public async Task Multiple_entity_types_update_in_one_batch_with_own_filters_and_sets()
+    {
+        RequireDatabase();
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            await seed.Items.ExecuteDeleteAsync();
+            seed.Items.Add(new Item { Id = 9911, Key1 = "multi-a", Key2 = 0, Key3 = 0, Active = false });
+            seed.Orders.Add(new Order { OrderNo = "ORD-9912", Amount = 10m, Status = OrderStatus.Pending });
+            seed.Customers.Add(new Customer { Code = "C-9913", Name = "Before", Active = true });
+            await seed.SaveChangesAsync();
+        }
+
+        // One batch, three different entity types: each operation carries its own
+        // Where(...) predicate and its own Set(...) payload for its table.
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            result = await context.BulkExecuteAsync(b =>
+            {
+                b.Update<Item>(op => op
+                    .Where(x => x.Key1 == "multi-a")
+                    .Set(x => x.Key2, 100)
+                    .Set(x => x.Key3, 200));
+
+                b.Update<Order>(op => op
+                    .Where(x => x.OrderNo == "ORD-9912" && x.Status == OrderStatus.Pending)
+                    .Set(x => x.Amount, 99.5m)
+                    .Set(x => x.Status, OrderStatus.Shipped));
+
+                b.Update<Customer>(op => op
+                    .Where(x => x.Code == "C-9913")
+                    .Set(x => x.Active, false));
+            });
+        }
+
+        Assert.Equal(3, result.Operations.Count);
+        Assert.Equal("Item", result.Operations[0].EntityType);
+        Assert.Equal("Order", result.Operations[1].EntityType);
+        Assert.Equal("Customer", result.Operations[2].EntityType);
+        Assert.All(result.Operations, op => Assert.Equal(1, op.RowsAffected));
+        Assert.Equal(3, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+
+        var item = await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 9911);
+        Assert.Equal(100, item.Key2);
+        Assert.Equal(200, item.Key3);
+
+        var order = await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == "ORD-9912");
+        Assert.Equal(99.5m, order.Amount);
+        Assert.Equal(OrderStatus.Shipped, order.Status);
+
+        var customer = await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == "C-9913");
+        Assert.False(customer.Active);
+        Assert.Equal("Before", customer.Name);
+    }
+
+    [SkippableFact]
+    public async Task Same_entity_operations_with_dynamically_built_filters_and_sets()
+    {
+        RequireDatabase();
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            await seed.Items.ExecuteDeleteAsync();
+            seed.Items.Add(new Item { Id = 9921, Key1 = "dyn-a", Key2 = 0, Key3 = 0, Active = false });
+            seed.Items.Add(new Item { Id = 9922, Key1 = "dyn-b", Key2 = 0, Key3 = 0, Active = true });
+            seed.Items.Add(new Item { Id = 9923, Key1 = "dyn-c", Key2 = 0, Key3 = 0, Active = true });
+            await seed.SaveChangesAsync();
+        }
+
+        // Simulates runtime-driven patching: each entry describes an operation whose
+        // predicate shape and SET payload are only known when the loop runs.
+        var patches = new[]
+        {
+            (MatchKey1: "dyn-a", RequireActive: false, Mode: "rename"),
+            (MatchKey1: "dyn-b", RequireActive: true, Mode: "count"),
+            (MatchKey1: "dyn-c", RequireActive: true, Mode: "flag")
+        };
+
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            result = await context.BulkExecuteAsync(b =>
+            {
+                foreach (var patch in patches)
+                {
+                    b.Update<Item>(op =>
+                    {
+                        // Dynamic WHERE: the predicate shape depends on the patch.
+                        if (patch.RequireActive)
+                        {
+                            op.Where(x => x.Key1 == patch.MatchKey1 && x.Active);
+                        }
+                        else
+                        {
+                            op.Where(x => x.Key1 == patch.MatchKey1);
+                        }
+
+                        // Dynamic SET: which columns get assigned depends on the mode.
+                        switch (patch.Mode)
+                        {
+                            case "rename":
+                                op.Set(x => x.Key1, "renamed-" + patch.MatchKey1);
+                                break;
+                            case "count":
+                                op.Set(x => x.Key2, 42);
+                                break;
+                            default:
+                                op.Set(x => x.Key3, 777);
+                                break;
+                        }
+                    });
+                }
+            });
+        }
+
+        Assert.Equal(3, result.Operations.Count);
+        Assert.All(result.Operations, op => Assert.Equal(1, op.RowsAffected));
+
+        await using var verify = Fixture.CreateContext();
+        var items = await verify.Items.AsNoTracking().Where(x => x.Id >= 9921 && x.Id <= 9923).ToDictionaryAsync(x => x.Id);
+
+        Assert.Equal("renamed-dyn-a", items[9921].Key1);
+        Assert.Equal(0, items[9921].Key3);
+
+        Assert.Equal("dyn-b", items[9922].Key1);
+        Assert.Equal(42, items[9922].Key2);
+        Assert.Equal(0, items[9922].Key3);
+
+        Assert.Equal(777, items[9923].Key3);
+        Assert.Equal(0, items[9923].Key2);
+    }
+
+    [SkippableFact]
     public async Task Chunked_batch_across_multiple_commands_stays_atomic()
     {
         RequireDatabase();

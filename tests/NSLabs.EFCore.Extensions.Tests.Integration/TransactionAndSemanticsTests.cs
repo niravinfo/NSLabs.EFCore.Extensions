@@ -94,6 +94,9 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
 
         await using (var seed = Fixture.CreateContext())
         {
+            // Other tests seed Items whose ParentId defaults to null; clear them so the
+            // affected-row count below is exact regardless of execution order.
+            await seed.Items.ExecuteDeleteAsync();
             seed.Items.Add(new Item { Id = nullRowId, ParentId = null, Key3 = 0 });
             seed.Items.Add(new Item { Id = nonNullRowId, ParentId = 123, Key3 = 0 });
             await seed.SaveChangesAsync();
