@@ -55,6 +55,23 @@ public class ValidationTests
     }
 
     [Fact]
+    public void Duplicate_set_assignments_fail_at_build_time_before_any_sql()
+    {
+        using var context = new TestDbContext();
+        var batch = new BulkBatch(context);
+
+        // Unlike EF Core's ExecuteUpdateAsync (which emits both SetProperty calls and lets
+        // SQL Server fail at execution time with a cryptic SqlException), the batch must
+        // reject the duplicate immediately with a clear error, before any database access.
+        var ex = Assert.Throws<InvalidOperationException>(() => batch.Update<Item>(op => op
+            .Where(x => x.Id == 1)
+            .Set(x => x.Key1, "first")
+            .Set(x => x.Key1, "second")));
+
+        Assert.Contains("assigns 'Key1' more than once", ex.Message);
+    }
+
+    [Fact]
     public async Task Duplicate_key_validation_runs_before_provider_or_database_access()
     {
         using var context = new TestDbContext();
