@@ -6,16 +6,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>NSLabs.EFCore.Extensions</RootNamespace>
+    <PackageId>NSLabs.EFCore.Extensions.SqlServer</PackageId>
+    <Description>SQL Server provider for NSLabs.EFCore.Extensions</Description>
+    <NoWarn>CA2255</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit" />
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration" />
-    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.SqlServer" />
   </ItemGroup>
 
 </Project>

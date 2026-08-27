@@ -3,17 +3,6 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
-internal sealed record SqlParam(string Name, object? Value);
-
-internal sealed class SqlChunkPlan
-{
-    public required string CommandText { get; init; }
-
-    public required IReadOnlyList<SqlParam> Parameters { get; init; }
-
-    public required IReadOnlyList<int> OperationIndices { get; init; }
-}
-
 internal static class SqlServerSqlGenerator
 {
     private const string TargetAlias = "t";

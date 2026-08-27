@@ -67,14 +67,15 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         ValidateUniqueUpsertKeys(_operations);
 
         var providerName = _context.Database.ProviderName;
-        if (!string.Equals(providerName, "Microsoft.EntityFrameworkCore.SqlServer", StringComparison.Ordinal))
+        var provider = BulkProviderRegistry.Resolve(providerName);
+        if (provider is null)
         {
             throw new NotSupportedException(
-                $"Provider '{providerName}' is not supported yet. SQL Server is implemented; PostgreSQL, MySQL and SQLite are planned milestones.");
+                $"Provider '{providerName}' is not supported. Ensure the matching NSLabs.EFCore.Extensions.* provider package is referenced (e.g. NSLabs.EFCore.Extensions.SqlServer for SQL Server).");
         }
 
-        var chunks = SqlServerSqlGenerator.Generate(_operations, options.MaxParametersPerCommand);
-        var counts = await SqlServerExecutor.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
+        var chunks = provider.Generate(_operations, options.MaxParametersPerCommand);
+        var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
 
         var operationResults = _operations
             .Select(op => new OperationResult(op.EntityType.DisplayName(), counts.GetValueOrDefault(op.GlobalIndex)))

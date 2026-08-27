@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions.SqlServer\NSLabs.EFCore.Extensions.SqlServer.csproj" />
   </ItemGroup>
 
 </Project>
