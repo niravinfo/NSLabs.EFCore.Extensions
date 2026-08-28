@@ -1,0 +1,18 @@
+<Project>
+  <PropertyGroup>
+    <Authors>NSLabs</Authors>
+    <Description>Batched conditional bulk update / upsert for Entity Framework Core. Execute N different WHERE + SET operations in one round-trip with sequential semantics and per-operation row counts.</Description>
+    <PackageTags>efcore;entity-framework-core;bulk;batch;update;upsert;sqlserver</PackageTags>
+    <RepositoryUrl>https://github.com/niravinfo/NSLabs.EFCore.Extensions</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/niravinfo/NSLabs.EFCore.Extensions</PackageProjectUrl>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
