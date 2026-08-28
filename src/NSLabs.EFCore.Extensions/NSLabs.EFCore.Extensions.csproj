@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <RootNamespace>NSLabs.EFCore.Extensions</RootNamespace>
+    <PackageId>NSLabs.EFCore.Extensions</PackageId>
+    <!-- Description inherited from Directory.Build.props -->
   </PropertyGroup>
 
   <ItemGroup>
