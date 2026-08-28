@@ -1,6 +1,6 @@
 # NSLabs.EFCore.Extensions
 
-Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip, one transaction**, with sequential semantics (later ops see earlier writes).
+Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see `docs/TRANSACTIONS.md`).
 
 SQL Server is supported first (batched parameterized script + `MERGE` for upserts). PostgreSQL / MySQL / SQLite providers are planned.
 
