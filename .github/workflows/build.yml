@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# No special permissions needed for build verification
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build / Test / Pack
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore NSLabs.EFCore.Extensions.slnx
+
+      - name: Build (Release)
+        run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release
+
+      - name: Test
+        # Runs both unit and integration tests.
+        # Integration tests use Testcontainers.MsSql — Docker is available on ubuntu-latest.
+        # If Docker is unavailable they are skipped via Xunit.SkippableFact.
+        run: dotnet test NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --logger "console;verbosity=minimal"
+
+      - name: Pack (verify packaging)
+        run: dotnet pack NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --output ./artifacts
+
+      - name: List packages
+        run: ls -lh ./artifacts/
+
+      - name: Upload packages artifact (for inspection)
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages
+          path: ./artifacts/*.nupkg
+          if-no-files-found: error

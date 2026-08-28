@@ -1,0 +1,137 @@
+name: Release
+
+# Trigger when a GitHub Release is published (manually created via GitHub UI).
+# This is the intended flow: create a new Release in the repository -> this workflow
+# builds, publishes to NuGet via OIDC Trusted Publishing, and attaches the .nupkg files
+# as separate assets to that same GitHub Release.
+on:
+  release:
+    types: [published]
+  # Optional: allow manual re-run from the Actions tab for debugging.
+  # When dispatched manually, provide `version` input (e.g. 1.2.3) and the workflow
+  # will pack with that version but will NOT automatically attach to a GitHub Release
+  # (use the `release` trigger for that).
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish (e.g., 1.2.3). Only used for manual dispatch."
+        required: false
+        type: string
+
+# Permissions required:
+# - id-token: write  -> to request the OIDC token for NuGet Trusted Publishing
+# - contents: write  -> to upload .nupkg assets to the GitHub Release
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  publish:
+    name: Pack and Publish to NuGet
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Determine package version
+        id: version
+        run: |
+          set -euo pipefail
+          RAW_VERSION=""
+
+          if [ "${{ github.event_name }}" = "release" ]; then
+            RAW_VERSION="${{ github.event.release.tag_name }}"
+            echo "Triggered by release with tag: $RAW_VERSION"
+          elif [ -n "${{ inputs.version }}" ]; then
+            RAW_VERSION="${{ inputs.version }}"
+            echo "Triggered by workflow_dispatch with input version: $RAW_VERSION"
+          else
+            RAW_VERSION="${GITHUB_REF_NAME:-}"
+            echo "Fallback ref name: $RAW_VERSION"
+          fi
+
+          if [ -z "$RAW_VERSION" ]; then
+            echo "::error::Could not determine version (empty tag/input)."
+            exit 1
+          fi
+
+          # Strip leading 'v' if present (e.g. v1.2.3 -> 1.2.3)
+          VERSION="${RAW_VERSION#v}"
+          # Also strip refs/tags/ prefix if GITHUB_REF_NAME was a full ref
+          VERSION="${VERSION#refs/tags/}"
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Version is empty after stripping prefix."
+            exit 1
+          fi
+
+          # Basic semver validation (allows prerelease/build metadata: 1.0.0-preview.1+build.5)
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "::warning::Version '$VERSION' does not look like SemVer. Proceeding anyway."
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved package version: $VERSION"
+
+      - name: Restore
+        run: dotnet restore NSLabs.EFCore.Extensions.slnx
+
+      - name: Build (Release)
+        run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release -p:ContinuousIntegrationBuild=true -p:Version=${{ env.VERSION }} -p:PackageVersion=${{ env.VERSION }}
+
+      - name: Test (unit + integration)
+        # Run tests before publishing. Integration tests use Testcontainers.MsSql.
+        run: dotnet test NSLabs.EFCore.Extensions.slnx --no-build --configuration Release -p:Version=${{ env.VERSION }} --logger "console;verbosity=minimal"
+
+      - name: Pack
+        run: |
+          # Packs all packable projects in the slnx (NSLabs.EFCore.Extensions + .SqlServer).
+          # Version is injected from the release tag so tags are the single source of truth.
+          dotnet pack NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --output ./artifacts -p:ContinuousIntegrationBuild=true -p:PackageVersion=${{ env.VERSION }} -p:Version=${{ env.VERSION }}
+          echo "Packages produced:"
+          ls -lh ./artifacts/
+
+      # Docs: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push to NuGet
+        run: |
+          # The temp API key from NuGet/login is valid for 1 hour and single-use.
+          # --skip-duplicate makes the step idempotent if the same version was already pushed.
+          dotnet nuget push ./artifacts/*.nupkg \
+            --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      # Attach every .nupkg (and .snupkg if produced) as a separate asset on the
+      # GitHub Release that triggered this workflow. Users can then download them
+      # directly from the Release page in addition to restoring from NuGet.
+      - name: Attach packages to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
+          fail_on_unmatched_files: false
+
+      - name: Upload packages artifact (for workflow_dispatch runs)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-packages-${{ env.VERSION }}
+          path: |
+            ./artifacts/*.nupkg
+            ./artifacts/*.snupkg
+          if-no-files-found: error
