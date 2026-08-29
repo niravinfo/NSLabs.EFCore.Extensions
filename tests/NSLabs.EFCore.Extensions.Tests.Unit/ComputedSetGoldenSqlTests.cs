@@ -189,9 +189,22 @@ public class ComputedSetGoldenSqlTests
         var ex = Assert.Throws<NotSupportedException>(() => Harness.GenerateSingle(b => b
             .Update<Item>(op => op
                 .Where(x => x.Id == 1)
-                .Set(x => x.Key1, x => x.Key1.Trim() + "a"))));
+                .Set(x => x.Key1, x => x.Key1.PadLeft(5)))));
 
         Assert.Contains("not supported", ex.Message.ToLower());
+    }
+
+    [Fact]
+    public void String_trim_is_now_supported()
+    {
+        var (sql, parameters) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op
+                .Where(x => x.Id == 1)
+                .Set(x => x.Key1, x => x.Key1.Trim() + "a")));
+
+        Assert.Contains("LTRIM(RTRIM([Key1]))", sql);
+        Assert.Contains(" + @p", sql);
+        Assert.Equal("a", Harness.Params(parameters).Values.First(v => v is string s && s == "a"));
     }
 
     [Fact]
@@ -329,13 +342,140 @@ public class ComputedSetGoldenSqlTests
     }
 
     [Fact]
-    public void Conditional_expression_not_supported()
+    public void Conditional_expression_is_now_supported()
     {
-        var ex = Assert.Throws<NotSupportedException>(() => Harness.GenerateSingle(b => b
+        var (sql, parameters) = Harness.GenerateSingle(b => b
             .Update<Item>(op => op
                 .Where(x => x.Id == 1)
-                .Set(x => x.Key2, x => x.Key2 > 0 ? x.Key2 + 1 : x.Key2))));
+                .Set(x => x.Key2, x => x.Key2 > 0 ? x.Key2 + 1 : x.Key2)));
 
-        Assert.Contains("not supported", ex.Message.ToLower());
+        Assert.Contains("CASE WHEN", sql);
+        Assert.Contains("THEN ([Key2] + @p", sql);
+        Assert.Contains("ELSE [Key2]", sql);
+        Assert.Contains("END", sql);
+    }
+
+    [Fact]
+    public void Conditional_expression_coalesce_and_string_methods()
+    {
+        // Coalesce via nullable ParentId -> int Key2
+        var (sqlCo, pCo) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => x.ParentId ?? 0)));
+        Assert.Contains("COALESCE([ParentId], @p0)", sqlCo);
+        Assert.Equal(0, pCo.First().Value);
+
+        // ToUpper
+        var (sqlUp, _) = Harness.GenerateSingle(b => b
+            .Update<Customer>(op => op.Where(x => x.Code == "A").Set(x => x.Name, x => x.Name.ToUpper())));
+        Assert.Contains("UPPER([Name])", sqlUp);
+
+        // ToLower
+        var (sqlLow, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.ToLower())));
+        Assert.Contains("LOWER([Key1])", sqlLow);
+
+        // Substring + Replace + Concat + Length + Math.Abs
+        var (sqlSub, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.Substring(1, 2))));
+        Assert.Contains("SUBSTRING([Key1]", sqlSub);
+
+        var (sqlRep, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.Replace("a", "b"))));
+        Assert.Contains("REPLACE([Key1]", sqlRep);
+
+        var (sqlConcat, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => string.Concat(x.Key1, "_suf"))));
+        Assert.Contains("CONCAT([Key1], @p", sqlConcat);
+
+        var (sqlLen, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => x.Key1.Length)));
+        Assert.Contains("LEN([Key1])", sqlLen);
+
+        var (sqlAbs, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => Math.Abs(x.Key2))));
+        Assert.Contains("ABS([Key2])", sqlAbs);
+    }
+
+    [Fact]
+    public void Conditional_with_conditional_in_where_and_upsert_alias()
+    {
+        var (sql, _) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1)
+                .Set(x => x.Key2, x => x.ParentId == null ? x.Key2 : x.Key2 * 2)));
+        Assert.Contains("CASE WHEN [ParentId] IS NULL THEN [Key2] ELSE ([Key2] * @p", sql);
+
+        var (sql2, _) = Harness.GenerateSingle(b => b
+            .Upsert<Item>(u => u.On(x => x.Id).Set(x => x.Key2, x => x.ParentId ?? 5).Values(new Item { Id = 1, Key2 = 10 })));
+        Assert.Contains("COALESCE([t].[ParentId]", sql2);
+    }
+
+    // ---- v2 granular golden tests per PLAN ----
+    [Fact]
+    public void String_concat_plus()
+    {
+        var (sql, p) = Harness.GenerateSingle(b => b
+            .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1 + "_suffix")));
+        Assert.Contains("([Key1] + @p0)", sql);
+        Assert.Equal("_suffix", p.First().Value);
+    }
+
+    [Fact]
+    public void String_to_upper_lower_trim()
+    {
+        var (sqlUp, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.ToUpper())));
+        Assert.Contains("UPPER([Key1])", sqlUp);
+        var (sqlLow, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.ToLower())));
+        Assert.Contains("LOWER([Key1])", sqlLow);
+        var (sqlTrim, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.Trim())));
+        Assert.Contains("LTRIM(RTRIM([Key1]))", sqlTrim);
+        var (sqlLTrim, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.TrimStart())));
+        Assert.Contains("LTRIM([Key1])", sqlLTrim);
+        var (sqlRTrim, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => x.Key1.TrimEnd())));
+        Assert.Contains("RTRIM([Key1])", sqlRTrim);
+    }
+
+    [Fact]
+    public void String_concat_method()
+    {
+        var (sql, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, x => string.Concat(x.Key1, x.Key1))));
+        Assert.Contains("CONCAT([Key1], [Key1])", sql);
+    }
+
+    [Fact]
+    public void Math_abs_round()
+    {
+        var (sqlAbs, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => Math.Abs(x.Key2))));
+        Assert.Contains("ABS([Key2])", sqlAbs);
+        var (sqlCeil, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => (int)Math.Ceiling((double)x.Key2))));
+        Assert.Contains("CEILING([Key2])", sqlCeil);
+        var (sqlFloor, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => (int)Math.Floor((double)x.Key2))));
+        Assert.Contains("FLOOR([Key2])", sqlFloor);
+        var (sqlRound, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => (int)Math.Round((double)x.Key2))));
+        Assert.Contains("ROUND([Key2]", sqlRound);
+    }
+
+    [Fact]
+    public void Upsert_string_concat_targets_t_alias()
+    {
+        var (sql, _) = Harness.GenerateSingle(b => b.Upsert<Customer>(u => u.On(x => x.Code).Set(x => x.Name, x => x.Name + "_upd").Values(new Customer { Code = "A", Name = "X" })));
+        Assert.Contains("[t].[Name] + @p", sql);
+        Assert.DoesNotContain("[s].[Name] + @p", sql);
+    }
+
+    [Fact]
+    public void Coalesce_golden()
+    {
+        var (sql, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => x.ParentId ?? -1)));
+        Assert.Contains("COALESCE([ParentId], @p", sql);
+    }
+
+    [Fact]
+    public void Conditional_with_arithmetic()
+    {
+        var (sql, _) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => x.Key2 > 0 ? x.Key2 + 10 : x.Key2 - 10)));
+        Assert.Contains("CASE WHEN", sql);
+        Assert.Contains("[Key2] > @p", sql);
+        Assert.Contains("THEN ([Key2] + @p", sql);
+        Assert.Contains("ELSE ([Key2] - @p", sql);
     }
 }

@@ -339,6 +339,12 @@ internal static class SqlServerSqlGenerator
         SqlBinaryNode binary => CountParameterNodes(binary.Left) + CountParameterNodes(binary.Right),
         SqlNotNode not => CountParameterNodes(not.Inner),
         SqlUnaryNode unary => CountParameterNodes(unary.Inner),
+        SqlConditionalNode cond => CountParameterNodes(cond.Test) + CountParameterNodes(cond.IfTrue) + CountParameterNodes(cond.IfFalse),
+        SqlCoalesceNode co => CountParameterNodes(co.Left) + CountParameterNodes(co.Right),
+        SqlMethodCallNode method => method.Args.Sum(CountParameterNodes),
+        SqlColumnNode => 0,
+        SqlBooleanNode => 0,
+        SqlNullCheckNode => 0,
         _ => 0
     };
 
@@ -364,6 +370,9 @@ internal static class SqlServerSqlGenerator
                 $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType))} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}",
             SqlNotNode not => $"NOT ({Emit(not.Inner, entityType, alias)})",
             SqlUnaryNode unary => EmitUnary(unary, entityType, alias),
+            SqlConditionalNode cond => $"CASE WHEN {Emit(cond.Test, entityType, alias)} THEN {Emit(cond.IfTrue, entityType, alias)} ELSE {Emit(cond.IfFalse, entityType, alias)} END",
+            SqlCoalesceNode co => $"COALESCE({Emit(co.Left, entityType, alias)}, {Emit(co.Right, entityType, alias)})",
+            SqlMethodCallNode method => EmitMethod(method, entityType, alias),
             SqlBinaryNode { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical =>
                 $"({Emit(logical.Left, entityType, alias)} {(logical.Operator == SqlBinaryOperator.And ? "AND" : "OR")} {Emit(logical.Right, entityType, alias)})",
             SqlBinaryNode arithmetic when IsArithmetic(arithmetic.Operator) =>
@@ -410,6 +419,26 @@ internal static class SqlServerSqlGenerator
             {
                 SqlUnaryOperator.Negate => $"-{Emit(unary.Inner, entityType, alias)}",
                 _ => throw new NotSupportedException($"Unary operator '{unary.Operator}' is not supported.")
+            };
+
+        private string EmitMethod(SqlMethodCallNode method, IEntityType entityType, string? alias)
+            => method.Method switch
+            {
+                "UPPER" => $"UPPER({Emit(method.Args[0], entityType, alias)})",
+                "LOWER" => $"LOWER({Emit(method.Args[0], entityType, alias)})",
+                "TRIM" => $"LTRIM(RTRIM({Emit(method.Args[0], entityType, alias)}))",
+                "LTRIM" => $"LTRIM({Emit(method.Args[0], entityType, alias)})",
+                "RTRIM" => $"RTRIM({Emit(method.Args[0], entityType, alias)})",
+                "LEN" => $"LEN({Emit(method.Args[0], entityType, alias)})",
+                "SUBSTRING" => $"SUBSTRING({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
+                "REPLACE" => $"REPLACE({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
+                "CONCAT" => $"CONCAT({string.Join(", ", method.Args.Select(a => Emit(a, entityType, alias)))})",
+                "ABS" => $"ABS({Emit(method.Args[0], entityType, alias)})",
+                "CEILING" => $"CEILING({Emit(method.Args[0], entityType, alias)})",
+                "FLOOR" => $"FLOOR({Emit(method.Args[0], entityType, alias)})",
+                "ROUND" when method.Args.Count == 2 => $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})",
+                "ROUND" when method.Args.Count == 3 => $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
+                _ => throw new NotSupportedException($"Method '{method.Method}' is not supported for SQL generation.")
             };
     }
 }

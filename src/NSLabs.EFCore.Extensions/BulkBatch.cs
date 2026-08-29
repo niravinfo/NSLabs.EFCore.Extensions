@@ -471,15 +471,9 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
     private static void NormalizeComputedParameters(SqlNode node)
     {
-        // Convert enum parameter values to their underlying numeric provider values
-        // so they are stored correctly. Column-converter handling already done in translator
-        // for ConvertedInTree cases; this covers remaining enum params.
         switch (node)
         {
-            case SqlParameterNode param when param.Value is not null && param.Value.GetType().IsEnum:
-                // Use reflection to replace value? SqlParameterNode is immutable; we need to mutate tree.
-                // Instead walk and rebuild: simplest is to keep param as-is and rely on converter at emit?
-                // For v1, leave enum values converted via underlying type.
+            case SqlParameterNode:
                 break;
             case SqlBinaryNode binary:
                 NormalizeComputedParameters(binary.Left);
@@ -490,6 +484,23 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                 break;
             case SqlNotNode not:
                 NormalizeComputedParameters(not.Inner);
+                break;
+            case SqlConditionalNode cond:
+                NormalizeComputedParameters(cond.Test);
+                NormalizeComputedParameters(cond.IfTrue);
+                NormalizeComputedParameters(cond.IfFalse);
+                break;
+            case SqlCoalesceNode co:
+                NormalizeComputedParameters(co.Left);
+                NormalizeComputedParameters(co.Right);
+                break;
+            case SqlMethodCallNode method:
+                foreach (var arg in method.Args)
+                    NormalizeComputedParameters(arg);
+                break;
+            case SqlColumnNode:
+            case SqlBooleanNode:
+            case SqlNullCheckNode:
                 break;
         }
     }
