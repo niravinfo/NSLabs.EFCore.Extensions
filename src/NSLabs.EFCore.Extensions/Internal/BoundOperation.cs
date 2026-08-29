@@ -13,7 +13,11 @@ internal sealed class BoundAssignment
 {
     public required IProperty Property { get; init; }
 
-    public required object? Value { get; init; }
+    public object? Value { get; init; }
+
+    public SqlNode? ValueExpression { get; init; }
+
+    public bool IsComputed => ValueExpression is not null;
 }
 
 internal sealed class BoundUpsertRow

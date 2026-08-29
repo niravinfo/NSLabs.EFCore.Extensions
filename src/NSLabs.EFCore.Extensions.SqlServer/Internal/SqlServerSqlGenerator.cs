@@ -76,7 +76,7 @@ internal static class SqlServerSqlGenerator
             return;
         }
 
-        var fixedCost = CountParameterNodes(spec.Guard) + operation.Assignments.Count;
+        var fixedCost = CountParameterNodes(spec.Guard) + operation.Assignments.Sum(assignment => assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1);
         var perRowCost = spec.InsertColumns.Count;
 
         if (fixedCost + perRowCost > maxParametersPerCommand)
@@ -191,7 +191,9 @@ internal static class SqlServerSqlGenerator
                     var assignment = operation.Assignments[i];
                     sql.Append(Quote(ModelBinder.GetColumnName(assignment.Property, operation.EntityType)))
                         .Append(" = ")
-                        .Append(emitter.EmitValue(assignment.Value));
+                        .Append(assignment.ValueExpression is not null
+                            ? emitter.Emit(assignment.ValueExpression, operation.EntityType)
+                            : emitter.EmitValue(assignment.Value));
                 }
 
                 break;
@@ -279,7 +281,9 @@ internal static class SqlServerSqlGenerator
                     var assignment = operation.Assignments[i];
                     sql.Append(Quote(ModelBinder.GetColumnName(assignment.Property, entityType)))
                         .Append(" = ")
-                        .Append(emitter.EmitValue(assignment.Value));
+                        .Append(assignment.ValueExpression is not null
+                            ? emitter.Emit(assignment.ValueExpression, entityType, TargetAlias)
+                            : emitter.EmitValue(assignment.Value));
                 }
             }
             else
@@ -318,7 +322,7 @@ internal static class SqlServerSqlGenerator
 
     private static int CountParameters(BoundOperation operation)
     {
-        var count = operation.Assignments.Count;
+        var count = operation.Assignments.Sum(assignment => assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1);
 
         foreach (var part in operation.PredicateParts)
         {
@@ -334,6 +338,7 @@ internal static class SqlServerSqlGenerator
         SqlParameterNode => 1,
         SqlBinaryNode binary => CountParameterNodes(binary.Left) + CountParameterNodes(binary.Right),
         SqlNotNode not => CountParameterNodes(not.Inner),
+        SqlUnaryNode unary => CountParameterNodes(unary.Inner),
         _ => 0
     };
 
@@ -358,8 +363,11 @@ internal static class SqlServerSqlGenerator
             SqlNullCheckNode nullCheck =>
                 $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType))} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}",
             SqlNotNode not => $"NOT ({Emit(not.Inner, entityType, alias)})",
+            SqlUnaryNode unary => EmitUnary(unary, entityType, alias),
             SqlBinaryNode { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical =>
                 $"({Emit(logical.Left, entityType, alias)} {(logical.Operator == SqlBinaryOperator.And ? "AND" : "OR")} {Emit(logical.Right, entityType, alias)})",
+            SqlBinaryNode arithmetic when IsArithmetic(arithmetic.Operator) =>
+                $"({Emit(arithmetic.Left, entityType, alias)} {RenderArithmetic(arithmetic.Operator)} {Emit(arithmetic.Right, entityType, alias)})",
             SqlBinaryNode comparison =>
                 $"{Emit(comparison.Left, entityType, alias)} {RenderComparison(comparison.Operator)} {Emit(comparison.Right, entityType, alias)}",
             _ => throw new NotSupportedException($"Cannot emit node '{node.GetType().Name}'.")
@@ -384,5 +392,24 @@ internal static class SqlServerSqlGenerator
             SqlBinaryOperator.GreaterThanOrEqual => ">=",
             _ => throw new NotSupportedException($"Operator '{op}' is not a comparison.")
         };
+
+        private static bool IsArithmetic(SqlBinaryOperator op) => op is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo;
+
+        private static string RenderArithmetic(SqlBinaryOperator op) => op switch
+        {
+            SqlBinaryOperator.Add => "+",
+            SqlBinaryOperator.Subtract => "-",
+            SqlBinaryOperator.Multiply => "*",
+            SqlBinaryOperator.Divide => "/",
+            SqlBinaryOperator.Modulo => "%",
+            _ => throw new NotSupportedException($"Operator '{op}' is not an arithmetic operator.")
+        };
+
+        private string EmitUnary(SqlUnaryNode unary, IEntityType entityType, string? alias)
+            => unary.Operator switch
+            {
+                SqlUnaryOperator.Negate => $"-{Emit(unary.Inner, entityType, alias)}",
+                _ => throw new NotSupportedException($"Unary operator '{unary.Operator}' is not supported.")
+            };
     }
 }
