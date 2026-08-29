@@ -70,3 +70,26 @@ internal sealed class SqlUnaryNode(SqlUnaryOperator op, SqlNode inner) : SqlNode
 
     public SqlNode Inner { get; } = inner;
 }
+
+internal sealed class SqlConditionalNode(SqlNode test, SqlNode ifTrue, SqlNode ifFalse) : SqlNode
+{
+    public SqlNode Test { get; } = test;
+
+    public SqlNode IfTrue { get; } = ifTrue;
+
+    public SqlNode IfFalse { get; } = ifFalse;
+}
+
+internal sealed class SqlCoalesceNode(SqlNode left, SqlNode right) : SqlNode
+{
+    public SqlNode Left { get; } = left;
+
+    public SqlNode Right { get; } = right;
+}
+
+internal sealed class SqlMethodCallNode(string method, IReadOnlyList<SqlNode> args) : SqlNode
+{
+    public string Method { get; } = method;
+
+    public IReadOnlyList<SqlNode> Args { get; } = args;
+}
