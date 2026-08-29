@@ -51,7 +51,7 @@ Niche: "batch of heterogeneous conditional DML, single round trip, pure EF metad
 ### Primary Surface — Context-Level Multi-Table Batching
 
 Operations may span **multiple tables and operation kinds** (update / upsert / delete)
-in **one round trip** with caller-controlled transaction (default no implicit transaction; opt in via `BulkExecuteOptions.AutoTransaction=true` or `Database.BeginTransactionAsync()` — see `docs/TRANSACTIONS.md`). Statements execute strictly in submission
+in **one round trip** with caller-controlled transaction (no implicit transaction — caller must use `Database.BeginTransactionAsync()` when atomicity is needed — see `docs/TRANSACTIONS.md`). Statements execute strictly in submission
 order, so callers control FK-safe sequencing exactly like raw SQL.
 
 ```csharp
@@ -188,7 +188,7 @@ public sealed class OperationResult
 ```
 
 Multi-table calls share the parameter budget (~2100 on SQL Server) across all operations;
-chunk boundaries may fall anywhere in the sequence. When wrapped in a transaction (`AutoTransaction=true` or ambient `Database.CurrentTransaction`), all chunks run inside that single transaction with order preserved; otherwise each statement uses its implicit per-statement transaction (see `docs/TRANSACTIONS.md`).
+chunk boundaries may fall anywhere in the sequence. When wrapped in an ambient `Database.CurrentTransaction`, all chunks run inside that single transaction with order preserved; otherwise each statement uses its implicit per-statement transaction (see `docs/TRANSACTIONS.md`).
 
 Use case: `result.Operations[0].RowsAffected == 0` means that specific filter matched
 nothing — callers can confirm changes before replying to their users. Pairs with a planned
@@ -197,8 +197,8 @@ nothing — callers can confirm changes before replying to their users. Pairs wi
 ### Options Bag
 
 - Chunk size (parameter budget)
-- Auto-transaction (`BulkExecuteOptions.AutoTransaction`, default `false` when no ambient transaction; set `true` or use `Database.BeginTransactionAsync()` for all-or-nothing — see `docs/TRANSACTIONS.md`)
-- `throwIfZeroAffected` per-op verification
+- Transaction — caller-managed via `Database.BeginTransactionAsync()` for all-or-nothing (no implicit transaction — see `docs/TRANSACTIONS.md`)
+- `throwIfZeroAffected` per-op verification (rollback only when inside an ambient transaction)
 - Command timeout
 - SQL logging hook
 
@@ -240,7 +240,7 @@ UPDATE [Items] SET [Key1] = @p3 WHERE [Key1] = @p4 AND [Key2] = @p5;
 
 - One `DbCommand`, one round trip; all values are parameters (never interpolated).
 - **Chunking** by parameter budget: SQL Server ~2100 params/request, MySQL & Npgsql ~65k
-  placeholders. An op with 4 params → ~500 ops/batch on SQL Server. All chunks run inside a single transaction only when the caller opts in (`AutoTransaction=true` or ambient `Database.CurrentTransaction`); otherwise each chunk commits per-statement (see `docs/TRANSACTIONS.md`).
+  placeholders. An op with 4 params → ~500 ops/batch on SQL Server. All chunks run inside a single transaction only when the caller wraps with an ambient `Database.CurrentTransaction`; otherwise each chunk commits per-statement (see `docs/TRANSACTIONS.md`).
 - Sequential semantics preserved naturally.
 - Per-op counts via appended captures streamed back in the same round trip:
 
@@ -358,4 +358,4 @@ samples/
 | Packaging | One package (`NSLabs.EFCore.Extensions`), all providers embedded |
 | NuGet id / namespace | `NSLabs.EFCore.Extensions` |
 | Entry points | `db.BulkExecuteAsync(...)` inline; `db.CreateBulkBatch()` deferred builder (accumulate anywhere, execute once); `db.Items.BulkUpdateAsync/BulkUpsertAsync` as single-table sugar |
-| Multi-table batching | Yes — one round trip across all operations; submission order defines execution and FK-safe sequencing; transaction is caller-controlled (`AutoTransaction=false` default, respects `Database.CurrentTransaction` — see `docs/TRANSACTIONS.md`) |
+| Multi-table batching | Yes — one round trip across all operations; submission order defines execution and FK-safe sequencing; transaction is caller-controlled (no implicit transaction, respects `Database.CurrentTransaction` — see `docs/TRANSACTIONS.md`) |

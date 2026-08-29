@@ -1,6 +1,6 @@
 # NSLabs.EFCore.Extensions
 
-Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see `docs/TRANSACTIONS.md`).
+Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see [Transactions](#transactions)).
 
 SQL Server is supported first (batched parameterized script + `MERGE` for upserts). PostgreSQL / MySQL / SQLite providers are planned.
 
@@ -70,6 +70,37 @@ var r = await batch.ExecuteAsync(ct);
 ```
 
 See `docs/DESIGN.md` for full semantics, translation pipeline, and provider strategies.
+
+## Transactions
+
+Bulk operations **do not create a transaction** (matches `EFCore.BulkExtensions` and EF Core `ExecuteUpdate` — each statement relies on SQL Server's implicit per-statement transaction). For all-or-nothing across multiple ops/chunks or mixed `SaveChanges`, start a transaction yourself:
+
+```csharp
+// 1. No transaction (default) — each statement commits individually
+var r = await db.BulkExecuteAsync(b =>
+{
+    b.Update<Item>(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "V1"));
+    b.Upsert<Customer>(u => u.On(x => x.Code).Values(customer));
+});
+
+// 2. Caller-managed transaction — atomic
+await using var tx = await db.Database.BeginTransactionAsync();
+try
+{
+    await db.BulkExecuteAsync(b => { b.Update<Item>(...); b.Delete<AuditLog>(...); });
+    await db.SaveChangesAsync(); // optional — participates in same tx
+    await tx.CommitAsync();
+}
+catch { await tx.RollbackAsync(); throw; }
+
+// Raw ADO.NET transaction must be flowed via EF:
+await db.Database.UseTransactionAsync(connTx);
+await db.BulkExecuteAsync(b => { ... });
+```
+
+The executor piggybacks on `Database.CurrentTransaction` (`command.Transaction = CurrentTransaction.GetDbTransaction()`) and never commits/rollbacks itself. `ThrowIfZeroAffected` is validated after all chunks — without a transaction prior chunks are already committed, with a transaction the caller can roll back.
+
+> Full details (detection, `HOLDLOCK`, `ThrowIfZeroAffected` interaction, migration from `AutoTransaction`): [docs/TRANSACTIONS.md](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/TRANSACTIONS.md)
 
 ## Repository
 

@@ -18,7 +18,7 @@ internal static class SqlServerExecutor
 
         if (database.CurrentTransaction is not null)
         {
-            return RunAsync(context, chunks, operations, options, ownTransaction: false, closeConnection: false, cancellationToken);
+            return RunAsync(context, chunks, operations, options, closeConnection: false, cancellationToken);
         }
 
         var strategy = database.CreateExecutionStrategy();
@@ -26,10 +26,10 @@ internal static class SqlServerExecutor
         if (strategy.RetriesOnFailure)
         {
             return strategy.ExecuteAsync(
-                () => RunAsync(context, chunks, operations, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken));
+                () => RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken));
         }
 
-        return RunAsync(context, chunks, operations, options, ownTransaction: options.AutoTransaction, closeConnection: true, cancellationToken);
+        return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
     }
 
     private static async Task<Dictionary<int, int>> RunAsync(
@@ -37,28 +37,30 @@ internal static class SqlServerExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
-        bool ownTransaction,
         bool closeConnection,
         CancellationToken cancellationToken)
     {
         var counts = new Dictionary<int, int>();
         var database = context.Database;
-        IDbContextTransaction? ownedTransaction = null;
+        var connection = database.GetDbConnection();
+        var transaction = database.CurrentTransaction?.GetDbTransaction();
+        var shouldCloseConnection = false;
 
         try
         {
-            if (ownTransaction)
+            if (closeConnection && connection.State == ConnectionState.Closed)
             {
                 await database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
-                ownedTransaction = await database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+                shouldCloseConnection = true;
             }
 
-            var transaction = database.CurrentTransaction?.GetDbTransaction();
+            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
 
-            await ExecuteCoreAsync(database.GetDbConnection(), transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
-
-            // Validate zero-row operations while the transaction is still open so the
-            // entire batch can be rolled back instead of partially committed.
+            // When ThrowIfZeroAffected is true and an ambient transaction is present the caller
+            // can roll back atomically. Without an ambient transaction each statement has already
+            // committed via SQL Server's implicit per-statement transaction, so the exception
+            // informs the caller but cannot undo prior chunks. The caller controls rollback via
+            // Database.BeginTransactionAsync().
             if (options.ThrowIfZeroAffected)
             {
                 foreach (var operation in operations)
@@ -70,36 +72,11 @@ internal static class SqlServerExecutor
                 }
             }
 
-            if (ownedTransaction is not null)
-            {
-                await ownedTransaction.CommitAsync(cancellationToken).ConfigureAwait(false);
-            }
-
             return counts;
-        }
-        catch
-        {
-            if (ownedTransaction is not null)
-            {
-                try
-                {
-                    await ownedTransaction.RollbackAsync(CancellationToken.None).ConfigureAwait(false);
-                }
-                catch
-                {
-                }
-            }
-
-            throw;
         }
         finally
         {
-            if (ownedTransaction is not null)
-            {
-                await ownedTransaction.DisposeAsync().ConfigureAwait(false);
-            }
-
-            if (closeConnection && database.GetDbConnection().State == ConnectionState.Open && ownedTransaction is not null)
+            if (shouldCloseConnection && connection.State == ConnectionState.Open)
             {
                 await database.CloseConnectionAsync().ConfigureAwait(false);
             }
