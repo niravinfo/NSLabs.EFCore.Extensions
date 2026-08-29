@@ -101,7 +101,7 @@ public class UpdateExecutionTests : SqlServerTestBase
     }
 
     [SkippableFact]
-    public async Task Throw_if_zero_affected_rolls_back_entire_batch()
+    public async Task Throw_if_zero_affected_without_transaction_throws_but_does_not_roll_back_previous_ops()
     {
         RequireDatabase();
         const int id = 9105;
@@ -122,6 +122,38 @@ public class UpdateExecutionTests : SqlServerTestBase
             new BulkExecuteOptions { ThrowIfZeroAffected = true }));
 
         Assert.Equal(1, exception.OperationIndex);
+
+        await using var verify = Fixture.CreateContext();
+        // Without an ambient transaction each statement commits individually;
+        // the first update is not rolled back when the second operation throws.
+        Assert.Equal("changed", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
+    }
+
+    [SkippableFact]
+    public async Task Throw_if_zero_affected_rolls_back_when_wrapped_in_transaction()
+    {
+        RequireDatabase();
+        const int id = 9106;
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            seed.Items.Add(new Item { Id = id, Key1 = "keep" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var context = Fixture.CreateContext();
+        await using var tx = await context.Database.BeginTransactionAsync();
+
+        var exception = await Assert.ThrowsAsync<BulkZeroRowsAffectedException>(() => context.BulkExecuteAsync(
+            b =>
+            {
+                b.Update<Item>(op => op.Where(x => x.Id == id).Set(x => x.Key1, "changed"));
+                b.Delete<Item>(op => op.Where(x => x.Id == 999_999_999));
+            },
+            new BulkExecuteOptions { ThrowIfZeroAffected = true }));
+
+        Assert.Equal(1, exception.OperationIndex);
+        await tx.RollbackAsync();
 
         await using var verify = Fixture.CreateContext();
         Assert.Equal("keep", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
@@ -387,7 +419,7 @@ public class UpdateExecutionTests : SqlServerTestBase
     }
 
     [SkippableFact]
-    public async Task Chunked_batch_across_multiple_commands_stays_atomic()
+    public async Task Chunked_batch_across_multiple_commands_executes_all_chunks_without_transaction()
     {
         RequireDatabase();
 
@@ -429,6 +461,54 @@ public class UpdateExecutionTests : SqlServerTestBase
         foreach (var (id, index) in ids.Select((id, i) => (id, i)))
         {
             Assert.Equal("upd-" + index, items[id].Key1);
+        }
+    }
+
+    [SkippableFact]
+    public async Task Chunked_batch_inside_user_transaction_is_atomic()
+    {
+        RequireDatabase();
+
+        var ids = Enumerable.Range(9121, 5).ToArray();
+        await using (var seed = Fixture.CreateContext())
+        {
+            foreach (var id in ids)
+            {
+                seed.Items.Add(new Item { Id = id, Key1 = "orig" });
+            }
+
+            await seed.SaveChangesAsync();
+        }
+
+        var commandTexts = new List<string>();
+        var capturedIds = ids.Select(id => (long)id).ToArray();
+
+        await using var context = Fixture.CreateContext();
+        await using var tx = await context.Database.BeginTransactionAsync();
+
+        await context.BulkExecuteAsync(b =>
+        {
+            foreach (var (id, index) in ids.Select((id, i) => (id, i)))
+            {
+                b.Update<Item>(op => op
+                    .Where(x => x.Id == capturedIds[index])
+                    .Set(x => x.Key1, "tx-upd-" + index));
+            }
+        }, new BulkExecuteOptions
+        {
+            MaxParametersPerCommand = 4,
+            OnCommandText = commandTexts.Add
+        });
+
+        await tx.CommitAsync();
+
+        Assert.True(commandTexts.Count >= 2, $"Expected chunking into multiple commands but got {commandTexts.Count}.");
+
+        await using var verify = Fixture.CreateContext();
+        var items = await verify.Items.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        foreach (var (id, index) in ids.Select((id, i) => (id, i)))
+        {
+            Assert.Equal("tx-upd-" + index, items[id].Key1);
         }
     }
 }
