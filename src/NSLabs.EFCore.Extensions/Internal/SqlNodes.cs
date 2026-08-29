@@ -30,7 +30,17 @@ internal enum SqlBinaryOperator
     GreaterThan,
     GreaterThanOrEqual,
     And,
-    Or
+    Or,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Modulo
+}
+
+internal enum SqlUnaryOperator
+{
+    Negate
 }
 
 internal sealed class SqlBinaryNode(SqlBinaryOperator op, SqlNode left, SqlNode right) : SqlNode
@@ -52,4 +62,11 @@ internal sealed class SqlNullCheckNode(IProperty property, bool isNotNull) : Sql
     public IProperty Property { get; } = property;
 
     public bool IsNotNull { get; } = isNotNull;
+}
+
+internal sealed class SqlUnaryNode(SqlUnaryOperator op, SqlNode inner) : SqlNode
+{
+    public SqlUnaryOperator Operator { get; } = op;
+
+    public SqlNode Inner { get; } = inner;
 }
