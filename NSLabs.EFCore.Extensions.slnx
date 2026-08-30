@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/NSLabs.EFCore.Extensions.Samples.Shared/NSLabs.EFCore.Extensions.Samples.Shared.csproj" />
+    <Project Path="samples/NSLabs.EFCore.Extensions.Samples.SqlServer/NSLabs.EFCore.Extensions.Samples.SqlServer.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/NSLabs.EFCore.Extensions/NSLabs.EFCore.Extensions.csproj" />
     <Project Path="src/NSLabs.EFCore.Extensions.SqlServer/NSLabs.EFCore.Extensions.SqlServer.csproj" />
