@@ -83,10 +83,13 @@ Provider-consistent layout for future Postgres/MySql (`Shared` + per-provider ho
 - `samples/NSLabs.EFCore.Extensions.Samples.Shared/` — provider-agnostic domain + scenarios (`Basic`/`Advanced`/`Transaction`/`RealWorld`/`TableApiAndOptions`) with isolated database clear before each run
 - `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/` — thin host (`Host` + `Microsoft.Extensions.Logging.Console`, `UseSqlServer`)
 
-**Quick start:**
+**Quick start (Windows / Linux):**
 ```bash
+# Windows (LocalDB) or bare Linux with env override - DB auto-created via EnsureCreatedAsync
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
-# Logs via ILogger (AddConsole), isolated DbContext per menu choice
+
+# One-click Docker (Linux/Windows/Mac) - no manual DB setup, DB auto-created, only sample logs shown
+docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up --build --attach samples
 ```
 
 ## Transactions

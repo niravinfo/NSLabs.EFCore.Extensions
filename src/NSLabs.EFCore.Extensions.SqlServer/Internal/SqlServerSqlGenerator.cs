@@ -345,6 +345,9 @@ internal static class SqlServerSqlGenerator
         SqlColumnNode => 0,
         SqlBooleanNode => 0,
         SqlNullCheckNode => 0,
+        SqlLikeNode => 1,
+        SqlInNode inNode => inNode.Values.Count,
+        SqlIsEmptyNode => 0,
         _ => 0
     };
 
@@ -373,6 +376,9 @@ internal static class SqlServerSqlGenerator
             SqlConditionalNode cond => $"CASE WHEN {Emit(cond.Test, entityType, alias)} THEN {Emit(cond.IfTrue, entityType, alias)} ELSE {Emit(cond.IfFalse, entityType, alias)} END",
             SqlCoalesceNode co => $"COALESCE({Emit(co.Left, entityType, alias)}, {Emit(co.Right, entityType, alias)})",
             SqlMethodCallNode method => EmitMethod(method, entityType, alias),
+            SqlLikeNode like => EmitLike(like, entityType, alias),
+            SqlInNode inNode => EmitIn(inNode, entityType, alias),
+            SqlIsEmptyNode empty => EmitIsEmpty(empty, entityType, alias),
             SqlBinaryNode { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical =>
                 $"({Emit(logical.Left, entityType, alias)} {(logical.Operator == SqlBinaryOperator.And ? "AND" : "OR")} {Emit(logical.Right, entityType, alias)})",
             SqlBinaryNode arithmetic when IsArithmetic(arithmetic.Operator) =>
@@ -440,5 +446,33 @@ internal static class SqlServerSqlGenerator
                 "ROUND" when method.Args.Count == 3 => $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
                 _ => throw new NotSupportedException($"Method '{method.Method}' is not supported for SQL generation.")
             };
+
+        private string EmitLike(SqlLikeNode like, IEntityType entityType, string? alias)
+        {
+            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(like.Property, entityType))}";
+            var param = EmitValue(like.PatternValue);
+            var op = like.Negated ? "NOT LIKE" : "LIKE";
+            return $"{col} {op} {param}";
+        }
+
+        private string EmitIn(SqlInNode inNode, IEntityType entityType, string? alias)
+        {
+            if (inNode.Values.Count == 0)
+            {
+                return inNode.Negated ? "1=1" : "1=0";
+            }
+
+            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(inNode.Property, entityType))}";
+            var op = inNode.Negated ? "NOT IN" : "IN";
+            var list = string.Join(", ", inNode.Values.Select(v => EmitValue(v)));
+            return $"{col} {op} ({list})";
+        }
+
+        private string EmitIsEmpty(SqlIsEmptyNode empty, IEntityType entityType, string? alias)
+        {
+            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(empty.Property, entityType))}";
+            var check = $"({col} IS NULL OR {col} = '')";
+            return empty.Negated ? $"NOT {check}" : check;
+        }
     }
 }

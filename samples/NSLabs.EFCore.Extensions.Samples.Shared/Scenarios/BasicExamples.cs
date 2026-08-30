@@ -72,13 +72,10 @@ public static class BasicExamples
         db.ChangeTracker.Clear();
         logger.LogInformation("Created {Count} products with zero stock", products.Length);
 
-        var mouseSku = products[0].Sku;
-        var keyboardSku = products[1].Sku;
-        var monitorSku = products[2].Sku;
         var result = await db.BulkExecuteAsync(batch =>
         {
             batch.Update<Product>(op => op
-                .Where(p => p.StockQuantity == 0 && (p.Sku == mouseSku || p.Sku == keyboardSku || p.Sku == monitorSku))
+                .Where(p => p.StockQuantity == 0 && p.Sku.Contains(suffix))
                 .Set(p => p.IsActive, false));
         });
 

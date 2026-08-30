@@ -20,7 +20,9 @@ builder.Logging.SetMinimumLevel(LogLevel.Information);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 if (string.IsNullOrWhiteSpace(connectionString))
 {
-    Console.Error.WriteLine("Connection string 'DefaultConnection' not found. Check appsettings.json or SAMPLE_CONNECTION_STRING env var.");
+    Console.Error.WriteLine("Connection string 'DefaultConnection' not found. Check appsettings.json or set ConnectionStrings__DefaultConnection env var.");
+    Console.Error.WriteLine("  Windows (LocalDB): Server=(localdb)\\mssqllocaldb;Database=NSLabsBulkExtensionsSample;Trusted_Connection=True;TrustServerCertificate=True");
+    Console.Error.WriteLine("  Linux/Docker:      Server=localhost,1433;Database=NSLabsBulkExtensionsSample;User Id=sa;Password=YourStrong@Passw0rd;TrustServerCertificate=True");
     return 1;
 }
 
@@ -38,119 +40,49 @@ logger.LogInformation("Connection: {Conn}", connectionString.Split(';', StringSp
 
 await EnsureDatabaseAsync(scopeFactory, logger);
 
-while (true)
+try
 {
-    PrintMenu(logger);
-    var choice = Console.ReadLine()?.Trim();
-    if (choice == "0" || string.IsNullOrEmpty(choice))
-    {
-        logger.LogInformation("Exiting samples");
-        break;
-    }
-
-    try
-    {
-        await ExecuteScenarioAsync(scopeFactory, choice, logger);
-    }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Scenario {Choice} failed", choice);
-    }
-
-    if (!Console.IsInputRedirected)
-    {
-        logger.LogInformation("Press any key to continue...");
-        try { Console.ReadKey(intercept: true); } catch { await Task.Delay(100); }
-        try { Console.Clear(); } catch { }
-    }
-    else
-    {
-        // Non-interactive (piped) run - small delay to avoid tight loop
-        await Task.Delay(200);
-    }
-}
-
-return 0;
-
-static void PrintMenu(ILogger logger)
-{
-    logger.LogInformation("======================== MAIN MENU ========================");
-    logger.LogInformation(" BASIC:      1 - Basic examples");
-    logger.LogInformation(" ADVANCED:   2 - Advanced examples");
-    logger.LogInformation(" TX:         3 - Transaction examples");
-    logger.LogInformation(" REALWORLD:  4 - Real-world examples");
-    logger.LogInformation(" TABLE API:  6 - Table API and Options (CreateBulkBatch, BulkUpdateAsync, ThrowIfZeroAffected, chunking)");
-    logger.LogInformation(" OTHER:      5 - Run ALL  |  7 - Clean database  |  0 - Exit");
-    logger.LogInformation("===========================================================");
-}
-
-static async Task ExecuteScenarioAsync(IServiceScopeFactory scopeFactory, string choice, ILogger logger)
-{
-    // Each scenario gets an isolated DbContext to avoid ChangeTracker staleness
     await using var scope = scopeFactory.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<SampleDbContext>();
 
-    switch (choice)
-    {
-        case "1": await BasicExamples.RunAllAsync(db, logger); break;
-        case "2": await AdvancedExamples.RunAllAsync(db, logger); break;
-        case "3": await TransactionExamples.RunAllAsync(db, logger); break;
-        case "4": await RealWorldExamples.RunAllAsync(db, logger); break;
-        case "5":
-            await BasicExamples.RunAllAsync(db, logger);
-            db.ChangeTracker.Clear();
-            await AdvancedExamples.RunAllAsync(db, logger);
-            db.ChangeTracker.Clear();
-            await TransactionExamples.RunAllAsync(db, logger);
-            db.ChangeTracker.Clear();
-            await RealWorldExamples.RunAllAsync(db, logger);
-            db.ChangeTracker.Clear();
-            await TableApiAndOptionsExamples.RunAllAsync(db, logger);
-            logger.LogInformation("All examples completed");
-            break;
-        case "6": await TableApiAndOptionsExamples.RunAllAsync(db, logger); break;
-        case "7": await CleanDatabaseAsync(db, logger); break;
-        default: logger.LogWarning("Invalid choice {Choice}", choice); break;
-    }
+    await BasicExamples.RunAllAsync(db, logger);
+    db.ChangeTracker.Clear();
+    
+    await AdvancedExamples.RunAllAsync(db, logger);
+    db.ChangeTracker.Clear();
+    
+    await TransactionExamples.RunAllAsync(db, logger);
+    db.ChangeTracker.Clear();
+    
+    await RealWorldExamples.RunAllAsync(db, logger);
+    db.ChangeTracker.Clear();
+    
+    await TableApiAndOptionsExamples.RunAllAsync(db, logger);
+
+    logger.LogInformation("All examples completed successfully");
+    return 0;
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "Scenario execution failed");
+    return 1;
 }
 
 static async Task EnsureDatabaseAsync(IServiceScopeFactory scopeFactory, ILogger logger)
 {
+    // Docker healthcheck + depends_on: service_healthy already waits for SQL Server to be ready.
+    // No retry loop here - fail fast if unreachable (Option A: rely on Docker advantage).
     await using var scope = scopeFactory.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<SampleDbContext>();
     try
     {
-        var canConnect = await db.Database.CanConnectAsync();
-        if (!canConnect)
-        {
-            logger.LogInformation("Database not found, creating...");
-            await db.Database.EnsureCreatedAsync();
-        }
-        else
-        {
-            await db.Database.EnsureCreatedAsync();
-        }
-        
+        // EnsureCreated is idempotent: creates DB + schema if not exists, no-op otherwise.
+        await db.Database.EnsureCreatedAsync();
         logger.LogInformation("Database ready");
     }
     catch (Exception ex)
     {
-        logger.LogError(ex, "Database initialization failed. Ensure SQL Server is reachable. For LocalDB: sqllocaldb start mssqllocaldb or docker run -e ACCEPT_EULA=Y -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest");
+        logger.LogError(ex, "Database initialization failed. Ensure SQL Server is reachable. Windows: sqllocaldb start mssqllocaldb | Linux/Docker: docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up -d (or docker run -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD='YourStrong@Passw0rd' -p 1433:1433 mcr.microsoft.com/mssql/server:2022-latest) and set ConnectionStrings__DefaultConnection if needed.");
         throw;
     }
-}
-
-static async Task CleanDatabaseAsync(SampleDbContext db, ILogger logger)
-{
-    logger.LogInformation("Clean database requested");
-    Console.Write("Are you sure? Type 'yes' to confirm: ");
-    var confirm = Console.ReadLine()?.Trim().ToLowerInvariant();
-    if (confirm != "yes")
-    {
-        logger.LogInformation("Cancelled");
-        return;
-    }
-
-    await DatabaseHelper.ClearAllAsync(db, logger);
-    logger.LogInformation("Database cleaned");
 }
