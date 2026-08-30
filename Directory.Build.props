@@ -18,6 +18,6 @@
   </PropertyGroup>
 
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
-    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="/" />
+    <None Include="$(MSBuildThisFileDirectory)NUGET_README.md" Pack="true" PackagePath="/README.md" />
   </ItemGroup>
 </Project>
