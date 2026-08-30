@@ -79,14 +79,11 @@ public static class AdvancedExamples
     {
         logger.LogInformation("Example 3: Conditional Updates Across Tables");
         var suffix = Guid.NewGuid().ToString("N")[..6];
-        var vip1Email = $"vip1.{suffix}@example.com";
-        var vip2Email = $"vip2.{suffix}@example.com";
-        var regularEmail = $"regular.{suffix}@example.com";
         var customers = new[]
         {
-            new Customer { Email = vip1Email, Name = "VIP Customer 1", IsActive = true, LoyaltyPoints = 500, CreatedAt = DateTime.UtcNow.AddYears(-2) },
-            new Customer { Email = vip2Email, Name = "VIP Customer 2", IsActive = true, LoyaltyPoints = 750, CreatedAt = DateTime.UtcNow.AddYears(-3) },
-            new Customer { Email = regularEmail, Name = "Regular Customer", IsActive = true, LoyaltyPoints = 50, CreatedAt = DateTime.UtcNow.AddMonths(-6) }
+            new Customer { Email = $"vip1.{suffix}@example.com", Name = "VIP Customer 1", IsActive = true, LoyaltyPoints = 500, CreatedAt = DateTime.UtcNow.AddYears(-2) },
+            new Customer { Email = $"vip2.{suffix}@example.com", Name = "VIP Customer 2", IsActive = true, LoyaltyPoints = 750, CreatedAt = DateTime.UtcNow.AddYears(-3) },
+            new Customer { Email = $"regular.{suffix}@example.com", Name = "Regular Customer", IsActive = true, LoyaltyPoints = 50, CreatedAt = DateTime.UtcNow.AddMonths(-6) }
         };
         db.Customers.AddRange(customers);
         await db.SaveChangesAsync();
@@ -95,8 +92,8 @@ public static class AdvancedExamples
 
         var result = await db.BulkExecuteAsync(batch =>
         {
-            batch.Update<Customer>(op => op.Where(c => (c.Email == vip1Email || c.Email == vip2Email || c.Email == regularEmail) && c.LoyaltyPoints > 500 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 100));
-            batch.Update<Customer>(op => op.Where(c => (c.Email == vip1Email || c.Email == vip2Email || c.Email == regularEmail) && c.LoyaltyPoints < 100 && c.LastOrderDate == null).Set(c => c.IsActive, false));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LoyaltyPoints > 500 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 100));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LoyaltyPoints < 100 && c.LastOrderDate == null).Set(c => c.IsActive, false));
         });
         logger.LogInformation("Processed loyalty ops={Count}", result.Operations.Count);
         foreach (var op in result.Operations) logger.LogInformation("Rows={Rows}", op.RowsAffected);

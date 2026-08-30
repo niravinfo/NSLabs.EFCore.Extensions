@@ -93,3 +93,38 @@ internal sealed class SqlMethodCallNode(string method, IReadOnlyList<SqlNode> ar
 
     public IReadOnlyList<SqlNode> Args { get; } = args;
 }
+
+internal enum SqlLikeKind
+{
+    Contains,
+    StartsWith,
+    EndsWith,
+    Like
+}
+
+internal sealed class SqlLikeNode(IProperty property, object? patternValue, SqlLikeKind kind, bool negated = false) : SqlNode
+{
+    public IProperty Property { get; } = property;
+
+    public object? PatternValue { get; } = patternValue;
+
+    public SqlLikeKind Kind { get; } = kind;
+
+    public bool Negated { get; } = negated;
+}
+
+internal sealed class SqlInNode(IProperty property, IReadOnlyList<object?> values, bool negated = false) : SqlNode
+{
+    public IProperty Property { get; } = property;
+
+    public IReadOnlyList<object?> Values { get; } = values;
+
+    public bool Negated { get; } = negated;
+}
+
+internal sealed class SqlIsEmptyNode(IProperty property, bool negated = false) : SqlNode
+{
+    public IProperty Property { get; } = property;
+
+    public bool Negated { get; } = negated;
+}

@@ -140,16 +140,12 @@ public static class RealWorldExamples
     {
         logger.LogInformation("Example 4: Customer Loyalty Batch Processing");
         var suffix = Guid.NewGuid().ToString("N")[..6];
-        var bronzeEmail = $"bronze.{suffix}@example.com";
-        var silverEmail = $"silver.{suffix}@example.com";
-        var goldEmail = $"gold.{suffix}@example.com";
-        var inactiveEmail = $"inactive.{suffix}@example.com";
         var customers = new[]
         {
-            new Customer { Email = bronzeEmail, Name = "Bronze Customer", IsActive = true, LoyaltyPoints = 150, CreatedAt = DateTime.UtcNow.AddMonths(-3) },
-            new Customer { Email = silverEmail, Name = "Silver Customer", IsActive = true, LoyaltyPoints = 650, CreatedAt = DateTime.UtcNow.AddMonths(-6) },
-            new Customer { Email = goldEmail, Name = "Gold Customer", IsActive = true, LoyaltyPoints = 1500, CreatedAt = DateTime.UtcNow.AddYears(-1) },
-            new Customer { Email = inactiveEmail, Name = "Inactive Customer", IsActive = true, LoyaltyPoints = 50, CreatedAt = DateTime.UtcNow.AddYears(-2), LastOrderDate = DateTime.UtcNow.AddYears(-1) }
+            new Customer { Email = $"bronze.{suffix}@example.com", Name = "Bronze Customer", IsActive = true, LoyaltyPoints = 150, CreatedAt = DateTime.UtcNow.AddMonths(-3) },
+            new Customer { Email = $"silver.{suffix}@example.com", Name = "Silver Customer", IsActive = true, LoyaltyPoints = 650, CreatedAt = DateTime.UtcNow.AddMonths(-6) },
+            new Customer { Email = $"gold.{suffix}@example.com", Name = "Gold Customer", IsActive = true, LoyaltyPoints = 1500, CreatedAt = DateTime.UtcNow.AddYears(-1) },
+            new Customer { Email = $"inactive.{suffix}@example.com", Name = "Inactive Customer", IsActive = true, LoyaltyPoints = 50, CreatedAt = DateTime.UtcNow.AddYears(-2), LastOrderDate = DateTime.UtcNow.AddYears(-1) }
         };
         db.Customers.AddRange(customers);
         await db.SaveChangesAsync();
@@ -158,10 +154,10 @@ public static class RealWorldExamples
         var sixMonthsAgo = DateTime.UtcNow.AddMonths(-6);
         var result = await db.BulkExecuteAsync(batch =>
         {
-            batch.Update<Customer>(op => op.Where(c => (c.Email == bronzeEmail || c.Email == silverEmail || c.Email == goldEmail || c.Email == inactiveEmail) && c.LoyaltyPoints >= 100 && c.LoyaltyPoints < 500 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 50));
-            batch.Update<Customer>(op => op.Where(c => (c.Email == bronzeEmail || c.Email == silverEmail || c.Email == goldEmail || c.Email == inactiveEmail) && c.LoyaltyPoints >= 500 && c.LoyaltyPoints < 1000 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 100));
-            batch.Update<Customer>(op => op.Where(c => (c.Email == bronzeEmail || c.Email == silverEmail || c.Email == goldEmail || c.Email == inactiveEmail) && c.LoyaltyPoints >= 1000 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 200));
-            batch.Update<Customer>(op => op.Where(c => (c.Email == bronzeEmail || c.Email == silverEmail || c.Email == goldEmail || c.Email == inactiveEmail) && c.LastOrderDate != null && c.LastOrderDate < sixMonthsAgo && c.IsActive).Set(c => c.IsActive, false));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LoyaltyPoints >= 100 && c.LoyaltyPoints < 500 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 50));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LoyaltyPoints >= 500 && c.LoyaltyPoints < 1000 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 100));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LoyaltyPoints >= 1000 && c.IsActive).Set(c => c.LoyaltyPoints, c => c.LoyaltyPoints + 200));
+            batch.Update<Customer>(op => op.Where(c => c.Email.Contains(suffix) && c.LastOrderDate != null && c.LastOrderDate < sixMonthsAgo && c.IsActive).Set(c => c.IsActive, false));
         });
         logger.LogInformation("Loyalty batch ops={Ops} rows={Rows}", result.Operations.Count, result.TotalRowsAffected);
         db.ChangeTracker.Clear();
