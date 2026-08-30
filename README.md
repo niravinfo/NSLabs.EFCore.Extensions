@@ -69,7 +69,12 @@ ApplyRules(batch);
 var r = await batch.ExecuteAsync(ct);
 ```
 
-See `docs/DESIGN.md` for full semantics, translation pipeline, and provider strategies.
+## Documentation
+
+- **[Design & Architecture](docs/DESIGN.md)** — Full semantics, translation pipeline, and provider strategies
+- **[Transaction Semantics](docs/TRANSACTIONS.md)** — Detection, `HOLDLOCK`, `ThrowIfZeroAffected` interaction, migration from `AutoTransaction`
+- **[Computed SET Support](docs/COMPUTED_SET_SUPPORT.md)** — Computed column expressions in SET clauses
+- **[Testing Guide](docs/TESTING.md)** — Test structure and conventions
 
 ## Sample Application
 
@@ -113,7 +118,7 @@ await db.BulkExecuteAsync(b => { ... });
 
 The executor piggybacks on `Database.CurrentTransaction` (`command.Transaction = CurrentTransaction.GetDbTransaction()`) and never commits/rollbacks itself. `ThrowIfZeroAffected` is validated after all chunks — without a transaction prior chunks are already committed, with a transaction the caller can roll back.
 
-> Full details (detection, `HOLDLOCK`, `ThrowIfZeroAffected` interaction, migration from `AutoTransaction`): [docs/TRANSACTIONS.md](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/TRANSACTIONS.md)
+See the [Transaction Semantics](docs/TRANSACTIONS.md) documentation for complete details.
 
 ## Repository
 
