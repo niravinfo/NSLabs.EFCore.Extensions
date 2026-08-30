@@ -71,6 +71,19 @@ var r = await batch.ExecuteAsync(ct);
 
 See `docs/DESIGN.md` for full semantics, translation pipeline, and provider strategies.
 
+## Sample Application
+
+Provider-consistent layout for future Postgres/MySql (`Shared` + per-provider host):
+
+- `samples/NSLabs.EFCore.Extensions.Samples.Shared/` — provider-agnostic domain + scenarios (`Basic`/`Advanced`/`Transaction`/`RealWorld`/`TableApiAndOptions`) with isolated database clear before each run
+- `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/` — thin host (`Host` + `Microsoft.Extensions.Logging.Console`, `UseSqlServer`)
+
+**Quick start:**
+```bash
+dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
+# Logs via ILogger (AddConsole), isolated DbContext per menu choice
+```
+
 ## Transactions
 
 Bulk operations **do not create a transaction** (matches `EFCore.BulkExtensions` and EF Core `ExecuteUpdate` — each statement relies on SQL Server's implicit per-statement transaction). For all-or-nothing across multiple ops/chunks or mixed `SaveChanges`, start a transaction yourself:
