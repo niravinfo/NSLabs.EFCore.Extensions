@@ -14,8 +14,9 @@ internal static class SqlServerSqlGenerator
         ArgumentNullException.ThrowIfNull(operations);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxParametersPerCommand, 1);
 
-        var chunks = new List<SqlChunkPlan>();
-        var pending = new List<PendingUnit>();
+        // SAFETY S8: presizing never changes chunk boundaries; only reduces reallocations
+        var chunks = new List<SqlChunkPlan>(Math.Min(operations.Count, 16));
+        var pending = new List<PendingUnit>(Math.Min(operations.Count, 16));
         var pendingParamCount = 0;
 
         foreach (var operation in operations)
@@ -124,10 +125,20 @@ internal static class SqlServerSqlGenerator
 
     private static SqlChunkPlan BuildChunk(IReadOnlyList<PendingUnit> units)
     {
-        var emitter = new ParameterEmitter();
-        var sql = new StringBuilder();
+        // SAFETY S2,S11: distinct indices computed once, order preserved (insertion order); SQL is identical
+        var distinctIndices = GetDistinctIndices(units);
+        var estimatedParamCount = 0;
+        foreach (var u in units)
+        {
+            // Rough estimate for presizing; exact count not required for correctness
+            estimatedParamCount += u.Operation.Kind == BulkOperationKind.Upsert ? u.RowCount * 3 : 3;
+        }
 
-        foreach (var index in OperationIndicesOf(units))
+        var emitter = new ParameterEmitter(Math.Max(estimatedParamCount, 4));
+        // Presize StringBuilder: ~150 chars per unit + 30 per distinct index — avoids growth realloc
+        var sql = new StringBuilder(256 + (units.Count * 180) + (distinctIndices.Count * 32));
+
+        foreach (var index in distinctIndices)
         {
             sql.Append("DECLARE @rc").Append(index).AppendLine(" int;");
         }
@@ -152,16 +163,35 @@ internal static class SqlServerSqlGenerator
             sql.Append("SET @rc").Append(unit.Operation.GlobalIndex).AppendLine(" = @@ROWCOUNT;");
         }
 
-        sql.Append("SELECT ")
-            .Append(string.Join(", ", OperationIndicesOf(units).Select(index => $"@rc{index} AS Op{index}")))
-            .Append(';');
+        sql.Append("SELECT ");
+        for (var i = 0; i < distinctIndices.Count; i++)
+        {
+            if (i > 0) sql.Append(", ");
+            var idx = distinctIndices[i];
+            sql.Append("@rc").Append(idx).Append(" AS Op").Append(idx);
+        }
+        sql.Append(';');
 
         return new SqlChunkPlan
         {
             CommandText = sql.ToString(),
             Parameters = emitter.Parameters,
-            OperationIndices = OperationIndicesOf(units).ToArray()
+            OperationIndices = distinctIndices.ToArray()
         };
+    }
+
+    private static List<int> GetDistinctIndices(IReadOnlyList<PendingUnit> units)
+    {
+        var seen = new HashSet<int>();
+        var list = new List<int>(units.Count);
+        foreach (var unit in units)
+        {
+            if (seen.Add(unit.Operation.GlobalIndex))
+            {
+                list.Add(unit.Operation.GlobalIndex);
+            }
+        }
+        return list;
     }
 
     private static IEnumerable<int> OperationIndicesOf(IReadOnlyList<PendingUnit> units)
@@ -352,17 +382,30 @@ internal static class SqlServerSqlGenerator
     };
 
     internal static string Quote(string identifier)
-        => "[" + identifier.Replace("]", "]]") + "]";
+    {
+        // SAFETY S6: fast-path avoids Replace allocation when no escaping needed; identical result
+        if (identifier.IndexOf(']') < 0)
+        {
+            return "[" + identifier + "]";
+        }
+
+        return "[" + identifier.Replace("]", "]]") + "]";
+    }
 
     private readonly record struct PendingUnit(BoundOperation Operation, int StartRow, int RowCount);
 
     private sealed class ParameterEmitter
     {
-        private readonly List<SqlParam> _parameters = [];
+        private readonly List<SqlParam> _parameters;
 
         public IReadOnlyList<SqlParam> Parameters => _parameters;
 
         private int Counter { get; set; }
+
+        public ParameterEmitter(int capacity = 8)
+        {
+            _parameters = new List<SqlParam>(capacity);
+        }
 
         public string Emit(SqlNode node, IEntityType entityType, string? alias = null) => node switch
         {

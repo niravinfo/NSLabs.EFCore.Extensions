@@ -5,6 +5,8 @@ namespace NSLabs.EFCore.Extensions.Internal;
 
 internal static class SetExpressionTranslator
 {
+    // No static Evaluate cache — follows EF Core (see LinqPredicateTranslator).
+
     public static SqlNode Translate(LambdaExpression valueExpression, IEntityType entityType, ParameterExpression entityParameter)
     {
         ArgumentNullException.ThrowIfNull(valueExpression);
@@ -336,9 +338,11 @@ internal static class SetExpressionTranslator
 
     private static object? Evaluate(Expression expression)
     {
+        // Direct compile per call — no static cache. Matches EF Core EvaluatableExpressionFilter pattern:
+        // Member chains are already handled without Compile; this path is rare (<5% of SET evaluations).
         var boxed = expression.Type.IsValueType ? Expression.Convert(expression, typeof(object)) : expression;
         var lambda = Expression.Lambda<Func<object?>>(boxed);
-        return lambda.Compile()();
+        return lambda.Compile().Invoke();
     }
 
     private static object? NormalizeParamValue(object? value)

@@ -9,7 +9,8 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 {
     private readonly DbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
-    private readonly List<BoundOperation> _operations = [];
+    // SAFETY S2: presizing never changes order
+    private readonly List<BoundOperation> _operations = new(8);
 
     internal IReadOnlyList<BoundOperation> Operations => _operations;
 
@@ -90,7 +91,8 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
     internal static void ValidateUniqueUpsertKeys(IReadOnlyList<BoundOperation> operations)
     {
-        var buckets = new Dictionary<(string Table, string Shape), Dictionary<UpsertKey, (int OpIndex, int RowIndex)>>();
+        // SAFETY S9: presizing never changes duplicate detection logic
+        var buckets = new Dictionary<(string Table, string Shape), Dictionary<UpsertKey, (int OpIndex, int RowIndex)>>(operations.Count);
 
         foreach (var operation in operations)
         {
@@ -103,7 +105,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             var shape = string.Join("|", spec.ConflictProperties.Select(p => p.Name));
             var bucket = buckets.TryGetValue((table, shape), out var existing)
                 ? existing
-                : buckets[(table, shape)] = [];
+                : buckets[(table, shape)] = new Dictionary<UpsertKey, (int OpIndex, int RowIndex)>(spec.Rows.Count);
 
             for (var rowIndex = 0; rowIndex < spec.Rows.Count; rowIndex++)
             {

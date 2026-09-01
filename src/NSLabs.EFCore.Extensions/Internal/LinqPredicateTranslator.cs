@@ -367,7 +367,10 @@ internal static class LinqPredicateTranslator
             return ne.Constructor?.Invoke(args);
         }
 
-        // Fallback: try to compile (for captured string patterns etc.)
+        // Fallback: try to compile (for captured string patterns etc.) — no global cache, follows EF Core.
+        // EF Core does NOT keep static ConcurrentDictionary<Expression,Func> here; it evaluates via
+        // EvaluatableExpressionFilter + direct FieldInfo.GetValue for Member chains (already handled above)
+        // and compiles per-query which is then cached via IMemoryCache with SizeLimit+Expiration (per IServiceProvider).
         try
         {
             var lambda = System.Linq.Expressions.Expression.Lambda(expression);
