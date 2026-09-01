@@ -142,8 +142,8 @@ internal static class SqlServerSqlGenerator
         }
 
         var emitter = new ParameterEmitter(Math.Max(estimatedParamCount, 4));
-        // Presize StringBuilder: ~150 chars per unit + 30 per distinct index — avoids growth realloc
-        var sql = new StringBuilder(256 + (units.Count * 180) + (distinctIndices.Count * 32));
+        // EF Core pattern: StringBuilderCache (ThreadStatic pooling, max 1024) — reduces Gen0 per BuildChunk in hot loops
+        var sql = StringBuilderCache.Acquire(256 + (units.Count * 180) + (distinctIndices.Count * 32));
 
         foreach (var index in distinctIndices)
         {
@@ -181,7 +181,7 @@ internal static class SqlServerSqlGenerator
 
         return new SqlChunkPlan
         {
-            CommandText = sql.ToString(),
+            CommandText = StringBuilderCache.GetStringAndRelease(sql),
             Parameters = emitter.Parameters,
             OperationIndices = distinctIndices.ToArray()
         };
