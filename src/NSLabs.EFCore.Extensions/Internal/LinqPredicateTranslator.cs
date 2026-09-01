@@ -287,16 +287,48 @@ internal static class LinqPredicateTranslator
             UnaryExpression unary => ReferencesEntity(unary.Operand, entityParameter),
             BinaryExpression binary => ReferencesEntity(binary.Left, entityParameter)
                                        || ReferencesEntity(binary.Right, entityParameter),
-            MethodCallExpression call => call.Object is { } target && ReferencesEntity(target, entityParameter)
-                                         || call.Arguments.Any(argument => ReferencesEntity(argument, entityParameter)),
-            InvocationExpression invocation => ReferencesEntity(invocation.Expression, entityParameter)
-                                               || invocation.Arguments.Any(argument => ReferencesEntity(argument, entityParameter)),
+            MethodCallExpression call => ReferencesEntityCall(call, entityParameter),
+            InvocationExpression invocation => ReferencesEntityInvocation(invocation, entityParameter),
             ConditionalExpression conditional => ReferencesEntity(conditional.Test, entityParameter)
                                                  || ReferencesEntity(conditional.IfTrue, entityParameter)
                                                  || ReferencesEntity(conditional.IfFalse, entityParameter),
-            NewArrayExpression newArray => newArray.Expressions.Any(expression => ReferencesEntity(expression, entityParameter)),
+            NewArrayExpression newArray => AnyReferencesEntity(newArray.Expressions, entityParameter),
             _ => false
         };
+
+    // EF Core pattern: manual loop vs LINQ Any(predicate) closure alloc — hot path per predicate node
+    private static bool ReferencesEntityCall(MethodCallExpression call, ParameterExpression entityParameter)
+    {
+        if (call.Object is { } target && ReferencesEntity(target, entityParameter))
+        {
+            return true;
+        }
+
+        return AnyReferencesEntity(call.Arguments, entityParameter);
+    }
+
+    private static bool ReferencesEntityInvocation(InvocationExpression invocation, ParameterExpression entityParameter)
+    {
+        if (ReferencesEntity(invocation.Expression, entityParameter))
+        {
+            return true;
+        }
+
+        return AnyReferencesEntity(invocation.Arguments, entityParameter);
+    }
+
+    private static bool AnyReferencesEntity(IReadOnlyList<Expression> expressions, ParameterExpression entityParameter)
+    {
+        for (var i = 0; i < expressions.Count; i++)
+        {
+            if (ReferencesEntity(expressions[i], entityParameter))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static IProperty ResolveProperty(MemberExpression member, IEntityType entityType)
         => entityType.FindProperty(member.Member)
