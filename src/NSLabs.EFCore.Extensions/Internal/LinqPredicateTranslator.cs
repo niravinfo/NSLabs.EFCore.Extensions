@@ -277,7 +277,26 @@ internal static class LinqPredicateTranslator
     }
 
     private static string EscapeLike(string pattern)
-        => pattern.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+    {
+        // EF Core pattern: single-pass StringBuilderCache vs 3x Replace (3 string allocs) — for string.Contains/StartsWith/EndsWith LIKE
+        // Fast-path: no special chars → return original (no alloc) — EF Core SearchValues pattern manual
+        if (pattern.IndexOf('[') < 0 && pattern.IndexOf('%') < 0 && pattern.IndexOf('_') < 0)
+        {
+            return pattern;
+        }
+
+        var sb = StringBuilderCache.Acquire(pattern.Length + 8);
+        for (var i = 0; i < pattern.Length; i++)
+        {
+            var c = pattern[i];
+            if (c == '[') sb.Append("[[]");
+            else if (c == '%') sb.Append("[%]");
+            else if (c == '_') sb.Append("[_]");
+            else sb.Append(c);
+        }
+
+        return StringBuilderCache.GetStringAndRelease(sb);
+    }
 
     private static bool ReferencesEntity(Expression node, ParameterExpression entityParameter)
         => node switch
