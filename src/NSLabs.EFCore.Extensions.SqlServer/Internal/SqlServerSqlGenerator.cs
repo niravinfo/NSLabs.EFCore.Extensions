@@ -77,7 +77,14 @@ internal static class SqlServerSqlGenerator
             return;
         }
 
-        var fixedCost = CountParameterNodes(spec.Guard) + operation.Assignments.Sum(assignment => assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1);
+        // EF Core pattern: manual loop vs LINQ Sum — avoids enumerator alloc in hot ExpandUpsert
+        var fixedCost = CountParameterNodes(spec.Guard);
+        for (var i = 0; i < operation.Assignments.Count; i++)
+        {
+            var assignment = operation.Assignments[i];
+            fixedCost += assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1;
+        }
+
         var perRowCost = spec.InsertColumns.Count;
 
         if (fixedCost + perRowCost > maxParametersPerCommand)
@@ -243,7 +250,6 @@ internal static class SqlServerSqlGenerator
     {
         var spec = operation.UpsertSpec!;
         var entityType = operation.EntityType;
-        var insertColumnNames = spec.InsertColumns.Select(column => ModelBinder.GetColumnName(column, entityType)).ToArray();
 
         sql.Append("MERGE INTO ")
             .Append(Quote(ModelBinder.GetTableName(entityType)))
@@ -274,18 +280,25 @@ internal static class SqlServerSqlGenerator
             sql.Append(')');
         }
 
+        // EF Core pattern: manual loop vs Select+ToArray+string.Join — avoids 2 allocs per MERGE
         sql.Append(") AS [")
             .Append(SourceAlias)
-            .Append("] (")
-            .Append(string.Join(", ", insertColumnNames.Select(Quote)))
-            .Append(')');
+            .Append("] (");
+        for (var i = 0; i < spec.InsertColumns.Count; i++)
+        {
+            if (i > 0) sql.Append(", ");
+            sql.Append(Quote(ModelBinder.GetColumnName(spec.InsertColumns[i], entityType)));
+        }
+        sql.Append(')');
 
-        sql.Append(" ON ")
-            .Append(string.Join(" AND ", spec.ConflictProperties.Select(property =>
-            {
-                var column = Quote(ModelBinder.GetColumnName(property, entityType));
-                return $"[{TargetAlias}].{column} = [{SourceAlias}].{column}";
-            })));
+        sql.Append(" ON ");
+        for (var i = 0; i < spec.ConflictProperties.Count; i++)
+        {
+            if (i > 0) sql.Append(" AND ");
+            var column = Quote(ModelBinder.GetColumnName(spec.ConflictProperties[i], entityType));
+            sql.Append('[').Append(TargetAlias).Append("].").Append(column)
+               .Append(" = [").Append(SourceAlias).Append("].").Append(column);
+        }
 
         var hasMatchedUpdatePayload = operation.Assignments.Count > 0 || spec.UpdateColumns.Count > 0;
         if (hasMatchedUpdatePayload)
@@ -331,11 +344,20 @@ internal static class SqlServerSqlGenerator
             }
         }
 
-        sql.Append(" WHEN NOT MATCHED THEN INSERT (")
-            .Append(string.Join(", ", insertColumnNames.Select(Quote)))
-            .Append(") VALUES (")
-            .Append(string.Join(", ", insertColumnNames.Select(column => $"[{SourceAlias}].{Quote(column)}")))
-            .Append(");")
+        sql.Append(" WHEN NOT MATCHED THEN INSERT (");
+        for (var i = 0; i < spec.InsertColumns.Count; i++)
+        {
+            if (i > 0) sql.Append(", ");
+            sql.Append(Quote(ModelBinder.GetColumnName(spec.InsertColumns[i], entityType)));
+        }
+        sql.Append(") VALUES (");
+        for (var i = 0; i < spec.InsertColumns.Count; i++)
+        {
+            if (i > 0) sql.Append(", ");
+            var col = Quote(ModelBinder.GetColumnName(spec.InsertColumns[i], entityType));
+            sql.Append('[').Append(SourceAlias).Append("].").Append(col);
+        }
+        sql.Append(");")
             .AppendLine();
     }
 
@@ -347,12 +369,31 @@ internal static class SqlServerSqlGenerator
                 $"Operation #{operation.GlobalIndex} on '{operation.EntityType.DisplayName()}' has no predicate; refusing to emit unbounded DML.");
         }
 
-        return string.Join(" AND ", operation.PredicateParts.Select(part => emitter.Emit(part, operation.EntityType)));
+        // EF Core pattern: manual StringBuilder vs string.Join + Select — avoids LINQ alloc per UPDATE/DELETE
+        if (operation.PredicateParts.Count == 1)
+        {
+            return emitter.Emit(operation.PredicateParts[0], operation.EntityType);
+        }
+
+        var sb = new StringBuilder(64);
+        for (var i = 0; i < operation.PredicateParts.Count; i++)
+        {
+            if (i > 0) sb.Append(" AND ");
+            sb.Append(emitter.Emit(operation.PredicateParts[i], operation.EntityType));
+        }
+
+        return sb.ToString();
     }
 
     private static int CountParameters(BoundOperation operation)
     {
-        var count = operation.Assignments.Sum(assignment => assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1);
+        // EF Core pattern: manual loop vs LINQ Sum
+        var count = 0;
+        for (var i = 0; i < operation.Assignments.Count; i++)
+        {
+            var assignment = operation.Assignments[i];
+            count += assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1;
+        }
 
         foreach (var part in operation.PredicateParts)
         {
@@ -371,7 +412,7 @@ internal static class SqlServerSqlGenerator
         SqlUnaryNode unary => CountParameterNodes(unary.Inner),
         SqlConditionalNode cond => CountParameterNodes(cond.Test) + CountParameterNodes(cond.IfTrue) + CountParameterNodes(cond.IfFalse),
         SqlCoalesceNode co => CountParameterNodes(co.Left) + CountParameterNodes(co.Right),
-        SqlMethodCallNode method => method.Args.Sum(CountParameterNodes),
+        SqlMethodCallNode method => CountMethodArgs(method),
         SqlColumnNode => 0,
         SqlBooleanNode => 0,
         SqlNullCheckNode => 0,
@@ -380,6 +421,18 @@ internal static class SqlServerSqlGenerator
         SqlIsEmptyNode => 0,
         _ => 0
     };
+
+    private static int CountMethodArgs(SqlMethodCallNode method)
+    {
+        // EF Core pattern: manual loop vs LINQ Sum
+        var sum = 0;
+        for (var i = 0; i < method.Args.Count; i++)
+        {
+            sum += CountParameterNodes(method.Args[i]);
+        }
+
+        return sum;
+    }
 
     internal static string Quote(string identifier)
     {
@@ -471,24 +524,38 @@ internal static class SqlServerSqlGenerator
             };
 
         private string EmitMethod(SqlMethodCallNode method, IEntityType entityType, string? alias)
-            => method.Method switch
+        {
+            // EF Core pattern: switch with manual string building — avoids LINQ in CONCAT
+            switch (method.Method)
             {
-                "UPPER" => $"UPPER({Emit(method.Args[0], entityType, alias)})",
-                "LOWER" => $"LOWER({Emit(method.Args[0], entityType, alias)})",
-                "TRIM" => $"LTRIM(RTRIM({Emit(method.Args[0], entityType, alias)}))",
-                "LTRIM" => $"LTRIM({Emit(method.Args[0], entityType, alias)})",
-                "RTRIM" => $"RTRIM({Emit(method.Args[0], entityType, alias)})",
-                "LEN" => $"LEN({Emit(method.Args[0], entityType, alias)})",
-                "SUBSTRING" => $"SUBSTRING({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
-                "REPLACE" => $"REPLACE({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
-                "CONCAT" => $"CONCAT({string.Join(", ", method.Args.Select(a => Emit(a, entityType, alias)))})",
-                "ABS" => $"ABS({Emit(method.Args[0], entityType, alias)})",
-                "CEILING" => $"CEILING({Emit(method.Args[0], entityType, alias)})",
-                "FLOOR" => $"FLOOR({Emit(method.Args[0], entityType, alias)})",
-                "ROUND" when method.Args.Count == 2 => $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})",
-                "ROUND" when method.Args.Count == 3 => $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})",
-                _ => throw new NotSupportedException($"Method '{method.Method}' is not supported for SQL generation.")
-            };
+                case "UPPER": return $"UPPER({Emit(method.Args[0], entityType, alias)})";
+                case "LOWER": return $"LOWER({Emit(method.Args[0], entityType, alias)})";
+                case "TRIM": return $"LTRIM(RTRIM({Emit(method.Args[0], entityType, alias)}))";
+                case "LTRIM": return $"LTRIM({Emit(method.Args[0], entityType, alias)})";
+                case "RTRIM": return $"RTRIM({Emit(method.Args[0], entityType, alias)})";
+                case "LEN": return $"LEN({Emit(method.Args[0], entityType, alias)})";
+                case "SUBSTRING": return $"SUBSTRING({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
+                case "REPLACE": return $"REPLACE({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
+                case "CONCAT":
+                {
+                    // Manual loop vs string.Join + Select — preserves Emit side-effects order
+                    var sb = new StringBuilder("CONCAT(");
+                    for (var i = 0; i < method.Args.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append(Emit(method.Args[i], entityType, alias));
+                    }
+                    sb.Append(')');
+                    return sb.ToString();
+                }
+                case "ABS": return $"ABS({Emit(method.Args[0], entityType, alias)})";
+                case "CEILING": return $"CEILING({Emit(method.Args[0], entityType, alias)})";
+                case "FLOOR": return $"FLOOR({Emit(method.Args[0], entityType, alias)})";
+                case "ROUND" when method.Args.Count == 2: return $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
+                case "ROUND" when method.Args.Count == 3: return $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
+                default: throw new NotSupportedException($"Method '{method.Method}' is not supported for SQL generation.");
+            }
+        }
 
         private string EmitLike(SqlLikeNode like, IEntityType entityType, string? alias)
         {
@@ -507,8 +574,16 @@ internal static class SqlServerSqlGenerator
 
             var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(inNode.Property, entityType))}";
             var op = inNode.Negated ? "NOT IN" : "IN";
-            var list = string.Join(", ", inNode.Values.Select(v => EmitValue(v)));
-            return $"{col} {op} ({list})";
+            // EF Core pattern: manual loop vs string.Join+Select — avoids enumerator alloc for IN lists
+            var sb = new StringBuilder();
+            sb.Append(col).Append(' ').Append(op).Append(" (");
+            for (var i = 0; i < inNode.Values.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(EmitValue(inNode.Values[i]));
+            }
+            sb.Append(')');
+            return sb.ToString();
         }
 
         private string EmitIsEmpty(SqlIsEmptyNode empty, IEntityType entityType, string? alias)
