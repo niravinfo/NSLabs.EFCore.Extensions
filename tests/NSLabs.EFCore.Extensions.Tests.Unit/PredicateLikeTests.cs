@@ -80,6 +80,36 @@ public class PredicateLikeTests
     }
 
     [Fact]
+    public void Contains_with_underscore_escapes_like()
+    {
+        var (sql, pars) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Key1.Contains("a_b")).Set(x => x.Key3, 1)));
+        Assert.Contains("LIKE @p", sql);
+        var val = Harness.Params(pars).Values.First(v => v?.ToString()?.Contains("a") == true)?.ToString() ?? "";
+        Assert.Contains("[_]", val);
+    }
+
+    [Fact]
+    public void Contains_with_all_like_special_chars_escapes()
+    {
+        var (sql, pars) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Key1.Contains("a%b_c[d]e")).Set(x => x.Key3, 1)));
+        Assert.Contains("LIKE @p", sql);
+        var val = Harness.Params(pars).Values.First(v => v?.ToString()?.Contains("a") == true)?.ToString() ?? "";
+        Assert.Contains("[%]", val);
+        Assert.Contains("[_]", val);
+        Assert.Contains("[[]", val);
+        Assert.StartsWith("%", val);
+        Assert.EndsWith("%", val);
+    }
+
+    [Fact]
+    public void Contains_with_no_special_chars_is_not_escaped()
+    {
+        var (_, pars) = Harness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => x.Key1.Contains("abc")).Set(x => x.Key3, 1)));
+        var val = Harness.Params(pars).Values.First(v => v?.ToString() == "%abc%")?.ToString();
+        Assert.Equal("%abc%", val);
+    }
+
+    [Fact]
     public void Empty_in_renders_false()
     {
         var ids = Array.Empty<int>();

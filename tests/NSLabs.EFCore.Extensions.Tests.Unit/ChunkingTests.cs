@@ -123,4 +123,51 @@ public class ChunkingTests
         Assert.Contains("MERGE INTO [Customers]", chunks[0].CommandText);
         Assert.All(chunks.Skip(1), chunk => Assert.Contains("MERGE INTO [Customers]", chunk.CommandText));
     }
+
+    [Fact]
+    public void Chunked_plans_parameter_names_are_unique_per_chunk()
+    {
+        var chunks = Harness.Generate(b =>
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                var captured = i;
+                b.Update<Item>(op => op.Where(x => x.Id == captured).Set(x => x.Key1, "v"));
+            }
+        }, new BulkExecuteOptions { MaxParametersPerCommand = 10 });
+
+        Assert.True(chunks.Count > 1);
+        foreach (var chunk in chunks)
+        {
+            var names = chunk.Parameters.Select(p => p.Name).ToArray();
+            Assert.Equal(names.Length, names.Distinct().Count());
+            Assert.All(names, n => Assert.StartsWith("@p", n));
+        }
+    }
+
+    [Fact]
+    public void Parallel_generation_produces_independent_chunks()
+    {
+        var results = new System.Collections.Concurrent.ConcurrentBag<string>();
+        System.Threading.Tasks.Parallel.For(0, 20, i =>
+        {
+            var chunks = Harness.Generate(b =>
+            {
+                b.Update<Item>(op => op.Where(x => x.Id == i).Set(x => x.Key1, $"V{i}"));
+            });
+            results.Add(chunks[0].CommandText);
+        });
+        Assert.Equal(20, results.Count);
+        Assert.All(results, sql => Assert.Contains("UPDATE [Items]", sql));
+    }
+
+    [Fact]
+    public void Large_entity_batch_chunking_accounts_all_parameters()
+    {
+        var rows = Enumerable.Range(1, 100).Select(i => new Item { Id = i, Key1 = $"K{i}", Key2 = i }).ToArray();
+        var chunks = Harness.Generate(b => b.Update<Item>(rows), new BulkExecuteOptions { MaxParametersPerCommand = 20000 });
+        Assert.True(chunks.Count >= 1);
+        Assert.True(chunks.Sum(c => c.Parameters.Count) > 100);
+        Assert.All(chunks, c => Assert.NotEmpty(c.CommandText));
+    }
 }

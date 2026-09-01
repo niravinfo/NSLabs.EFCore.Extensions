@@ -40,7 +40,8 @@ internal static class SqlServerExecutor
         bool closeConnection,
         CancellationToken cancellationToken)
     {
-        var counts = new Dictionary<int, int>();
+        // SAFETY S11: presizing preserves per-op @@ROWCOUNT accumulation
+        var counts = new Dictionary<int, int>(operations.Count);
         var database = context.Database;
         var connection = database.GetDbConnection();
         var transaction = database.CurrentTransaction?.GetDbTransaction();
