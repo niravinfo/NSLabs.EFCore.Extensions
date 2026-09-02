@@ -9,7 +9,8 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 {
     private readonly DbContext _context = context ?? throw new ArgumentNullException(nameof(context));
 
-    private readonly List<BoundOperation> _operations = [];
+    // SAFETY S2: presizing never changes order
+    private readonly List<BoundOperation> _operations = new(8);
 
     internal IReadOnlyList<BoundOperation> Operations => _operations;
 
@@ -77,20 +78,28 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         var chunks = provider.Generate(_operations, options.MaxParametersPerCommand);
         var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
 
-        var operationResults = _operations
-            .Select(op => new OperationResult(op.EntityType.DisplayName(), counts.GetValueOrDefault(op.GlobalIndex)))
-            .ToArray();
+        // EF Core pattern: manual loop vs LINQ Select+Sum
+        var operationResults = new OperationResult[_operations.Count];
+        var total = 0;
+        for (var i = 0; i < _operations.Count; i++)
+        {
+            var op = _operations[i];
+            var affected = counts.GetValueOrDefault(op.GlobalIndex);
+            total += affected;
+            operationResults[i] = new OperationResult(op.EntityType.DisplayName(), affected);
+        }
 
         return new BulkExecuteResult
         {
-            TotalRowsAffected = counts.Values.Sum(),
+            TotalRowsAffected = total,
             Operations = operationResults
         };
     }
 
     internal static void ValidateUniqueUpsertKeys(IReadOnlyList<BoundOperation> operations)
     {
-        var buckets = new Dictionary<(string Table, string Shape), Dictionary<UpsertKey, (int OpIndex, int RowIndex)>>();
+        // SAFETY S9: presizing never changes duplicate detection logic
+        var buckets = new Dictionary<(string Table, string Shape), Dictionary<UpsertKey, (int OpIndex, int RowIndex)>>(operations.Count);
 
         foreach (var operation in operations)
         {
@@ -100,14 +109,26 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             }
 
             var table = operation.EntityType.GetTableName() ?? operation.EntityType.DisplayName();
-            var shape = string.Join("|", spec.ConflictProperties.Select(p => p.Name));
+
+            // EF Core pattern: manual StringBuilder vs string.Join+LINQ
+            string shape;
+            {
+                var sb = new System.Text.StringBuilder();
+                for (var s = 0; s < spec.ConflictProperties.Count; s++)
+                {
+                    if (s > 0) sb.Append('|');
+                    sb.Append(spec.ConflictProperties[s].Name);
+                }
+                shape = sb.ToString();
+            }
+
             var bucket = buckets.TryGetValue((table, shape), out var existing)
                 ? existing
-                : buckets[(table, shape)] = [];
+                : buckets[(table, shape)] = new Dictionary<UpsertKey, (int OpIndex, int RowIndex)>(spec.Rows.Count);
 
             for (var rowIndex = 0; rowIndex < spec.Rows.Count; rowIndex++)
             {
-                var key = new UpsertKey(spec.Rows[rowIndex].KeyValues);                if (bucket.TryGetValue(key, out var collision))
+                var key = new UpsertKey(spec.Rows[rowIndex].KeyValues); if (bucket.TryGetValue(key, out var collision))
                 {
                     throw new InvalidOperationException(
                         $"Duplicate upsert match-key on '{table}' between operation #{collision.OpIndex} (row {collision.RowIndex}) " +
@@ -123,24 +144,36 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
     {
         private readonly IReadOnlyList<object?> _values = values;
 
+        // EF Core pattern: HashCode struct (avoids 17*31 overflow bias, handles null correctly)
         public override int GetHashCode()
         {
-            unchecked
+            var hash = new HashCode();
+            foreach (var value in _values)
             {
-                var hash = 17;
-                foreach (var value in _values)
-                {
-                    hash = hash * 31 + (value?.GetHashCode() ?? 0);
-                }
-
-                return hash;
+                hash.Add(value);
             }
+
+            return hash.ToHashCode();
         }
 
         public override bool Equals(object? obj)
-            => obj is UpsertKey other
-               && _values.Count == other._values.Count
-               && _values.SequenceEqual(other._values, EqualityComparer<object?>.Default);
+        {
+            if (obj is not UpsertKey other || _values.Count != other._values.Count)
+            {
+                return false;
+            }
+
+            // Manual loop vs SequenceEqual — avoids enumerator allocation, EF Core hot-path pattern
+            for (var i = 0; i < _values.Count; i++)
+            {
+                if (!EqualityComparer<object?>.Default.Equals(_values[i], other._values[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
     }
 
     private BoundOperation BindUpdate<TEntity>(UpdateOperationBuilder<TEntity> builder) where TEntity : class
@@ -224,12 +257,19 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                     $"Entity '{entityType.DisplayName()}' has a discriminator but no concrete discriminator value; upsert requires a leaf entity type.");
         }
 
-        var insertColumns = new List<IProperty>(conflictProperties);
+        // EF Core pattern: HashSet for Contains check vs List.Contains O(n)
+        var insertColumnsSet = new HashSet<IProperty>(conflictProperties);
+        var insertColumns = new List<IProperty>(conflictProperties.Count + 8);
+        for (var i = 0; i < conflictProperties.Count; i++)
+        {
+            insertColumns.Add(conflictProperties[i]);
+        }
+
         foreach (var property in entityType.GetProperties())
         {
             // Insert columns allow non-store-generated primary keys (natural-key upserts);
             // store-generated columns (identity/computed) are always database-managed.
-            if (!ModelBinder.IsInsertBindable(property) || insertColumns.Contains(property))
+            if (!ModelBinder.IsInsertBindable(property) || !insertColumnsSet.Add(property))
             {
                 continue;
             }
@@ -237,16 +277,17 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             insertColumns.Add(property);
         }
 
-        if (discriminator is not null && !insertColumns.Contains(discriminator))
+        if (discriminator is not null && insertColumnsSet.Add(discriminator))
         {
             insertColumns.Add(discriminator);
         }
 
         var assignedUpsertColumns = new HashSet<IProperty>();
+        var conflictSetForCheck = new HashSet<IProperty>(conflictProperties);
         foreach (var (selector, value, valueExpression) in builder.Sets)
         {
             var property = ModelBinder.ResolveSelector(selector, entityType);
-            if (conflictProperties.Contains(property))
+            if (conflictSetForCheck.Contains(property))
             {
                 throw new InvalidOperationException(
                     $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': Set(...) cannot target conflict column '{property.Name}'.");
@@ -274,10 +315,25 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         }
 
         // Explicit Set(...) values form the matched-update payload; otherwise the full row
-        // (minus conflict and generated columns) is written back, mirroring entity-style updates.
-        var updateColumns = builder.Sets.Count > 0
-            ? []
-            : insertColumns.Where(column => ModelBinder.IsBindableScalar(column) && !conflictProperties.Contains(column)).ToList();
+        // (minus conflict and generated columns) is written back — EF Core pattern: manual loop + HashSet for Contains
+        List<IProperty> updateColumns;
+        if (builder.Sets.Count > 0)
+        {
+            updateColumns = [];
+        }
+        else
+        {
+            var conflictSet = new HashSet<IProperty>(conflictProperties);
+            updateColumns = new List<IProperty>(insertColumns.Count);
+            for (var i = 0; i < insertColumns.Count; i++)
+            {
+                var col = insertColumns[i];
+                if (ModelBinder.IsBindableScalar(col) && !conflictSet.Contains(col))
+                {
+                    updateColumns.Add(col);
+                }
+            }
+        }
 
         var hasMatchedUpdatePayload = builder.Sets.Count > 0 || updateColumns.Count > 0;
 
@@ -315,10 +371,11 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                 });
             }
 
+            // EF Core pattern: conflict columns are prefix of insertColumns → direct index, no LINQ First scan
             var keyValues = new object?[conflictProperties.Count];
             for (var i = 0; i < conflictProperties.Count; i++)
             {
-                keyValues[i] = insertValues.First(assignment => ReferenceEquals(assignment.Property, conflictProperties[i])).Value;
+                keyValues[i] = insertValues[i].Value;
             }
 
             spec.Rows.Add(new BoundUpsertRow { InsertValues = insertValues, KeyValues = keyValues });
@@ -342,7 +399,17 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         var primaryKey = entityType.FindPrimaryKey()
             ?? throw new InvalidOperationException($"Entity '{entityType.DisplayName()}' has no primary key; entity-style updates require one or an explicit match expression.");
 
-        var bindableProperties = entityType.GetProperties().Where(ModelBinder.IsBindableScalar).ToArray();
+        // EF Core pattern: manual loop vs LINQ Where+ToArray
+        var bindableList = new List<IProperty>();
+        foreach (var p in entityType.GetProperties())
+        {
+            if (ModelBinder.IsBindableScalar(p))
+            {
+                bindableList.Add(p);
+            }
+        }
+
+        var bindableProperties = bindableList.ToArray();
 
         foreach (var row in materialized)
         {

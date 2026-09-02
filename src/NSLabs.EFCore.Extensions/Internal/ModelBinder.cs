@@ -1,28 +1,40 @@
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
 internal static class ModelBinder
 {
+    // SAFETY S4,S5,S6: caches are read-only after creation, never affect semantics
+    private static readonly ConcurrentDictionary<IProperty, Func<object, object?>> _getterCache = new();
+
+    private static readonly ConcurrentDictionary<IProperty, ValueConverter?> _converterCache = new();
+
+    private static readonly ConcurrentDictionary<IEntityType, string> _tableNameCache = new();
+
+    private static readonly ConcurrentDictionary<(IEntityType EntityType, IProperty Property), string> _columnNameCache = new();
+
     public static IEntityType ResolveEntityType<TEntity>(IModel model) where TEntity : class
         => model.FindEntityType(typeof(TEntity))
            ?? throw new InvalidOperationException(
                $"Entity '{typeof(TEntity).Name}' is not part of the DbContext model. Register it via DbSet<TEntity> or modelBuilder.Entity<{typeof(TEntity).Name}>().");
 
     public static string GetTableName(IEntityType entityType)
-        => entityType.GetTableName()
-           ?? throw new InvalidOperationException($"Entity '{entityType.DisplayName()}' is not mapped to a relational table.");
+        => _tableNameCache.GetOrAdd(entityType, static et => et.GetTableName()
+           ?? throw new InvalidOperationException($"Entity '{et.DisplayName()}' is not mapped to a relational table."));
 
     public static string GetColumnName(IProperty property, IEntityType entityType)
-    {
-        var table = StoreObjectIdentifier.Create(entityType, StoreObjectType.Table)
-            ?? throw new InvalidOperationException($"Cannot resolve table identifier for '{entityType.DisplayName()}'.");
-
-        return property.GetColumnName(table)
-            ?? throw new InvalidOperationException($"Property '{property.Name}' has no column mapping on table '{table.DisplayName}'.");
-    }
+        => _columnNameCache.GetOrAdd((entityType, property), static key =>
+        {
+            var (et, prop) = key;
+            var table = StoreObjectIdentifier.Create(et, StoreObjectType.Table)
+                ?? throw new InvalidOperationException($"Cannot resolve table identifier for '{et.DisplayName()}'.");
+            return prop.GetColumnName(table)
+                ?? throw new InvalidOperationException($"Property '{prop.Name}' has no column mapping on table '{table.DisplayName()}'.");
+        });
 
     public static IProperty ResolveSelector(LambdaExpression selector, IEntityType entityType)
     {
@@ -49,7 +61,8 @@ internal static class ModelBinder
             return null;
         }
 
-        var converter = property.GetValueConverter() ?? property.GetRelationalTypeMapping().Converter;
+        // SAFETY S4: cached converter is identical to direct lookup; preserves enum/value-converter correctness
+        var converter = _converterCache.GetOrAdd(property, static p => p.GetValueConverter() ?? p.GetRelationalTypeMapping().Converter);
 
         if (converter is not null)
         {
@@ -98,17 +111,33 @@ internal static class ModelBinder
 
     public static object? ReadMemberValue(IProperty property, object instance)
     {
-        if (property.PropertyInfo is { } propertyInfo)
+        if (property.PropertyInfo is null && property.FieldInfo is null)
         {
-            return propertyInfo.GetValue(instance);
+            throw new InvalidOperationException($"Property '{property.Name}' has no CLR member and cannot be read from an entity instance.");
         }
 
-        if (property.FieldInfo is { } fieldInfo)
+        // SAFETY S2: cached getter returns identical value to reflection; preserves sequential semantics
+        var getter = _getterCache.GetOrAdd(property, static p =>
         {
-            return fieldInfo.GetValue(instance);
-        }
+            if (p.PropertyInfo is { } propertyInfo)
+            {
+                var instanceParam = Expression.Parameter(typeof(object), "instance");
+                var typedInstance = Expression.Convert(instanceParam, propertyInfo.DeclaringType!);
+                var propertyAccess = Expression.Property(typedInstance, propertyInfo);
+                var boxed = Expression.Convert(propertyAccess, typeof(object));
+                return Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
+            }
 
-        throw new InvalidOperationException($"Property '{property.Name}' has no CLR member and cannot be read from an entity instance.");
+            // FieldInfo is guaranteed non-null here because of the early throw above
+            var fieldInfo = p.FieldInfo!;
+            var fieldParam = Expression.Parameter(typeof(object), "instance");
+            var typedFieldInstance = Expression.Convert(fieldParam, fieldInfo.DeclaringType!);
+            var fieldAccess = Expression.Field(typedFieldInstance, fieldInfo);
+            var fieldBoxed = Expression.Convert(fieldAccess, typeof(object));
+            return Expression.Lambda<Func<object, object?>>(fieldBoxed, fieldParam).Compile();
+        });
+
+        return getter(instance);
     }
 
     public static bool IsBindableScalar(IProperty property)

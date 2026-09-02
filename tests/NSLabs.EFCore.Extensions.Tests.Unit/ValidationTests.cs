@@ -150,4 +150,27 @@ public class ValidationTests
         Assert.Equal(0, result.TotalRowsAffected);
         Assert.Empty(result.Operations);
     }
+
+    [Fact]
+    public void Duplicate_upsert_with_composite_conflict_target_detects_collisions()
+    {
+        using var context = new TestDbContext();
+        var batch = new BulkBatch(context);
+        batch.Upsert<Customer>(u => u.On(x => new { x.Code, x.Name }).Values(new Customer { Code = "C", Name = "N" }));
+        batch.Upsert<Customer>(u => u.On(x => new { x.Code, x.Name }).Values(new Customer { Code = "C", Name = "N" }));
+
+        var ex = Assert.Throws<InvalidOperationException>(() => BulkBatch.ValidateUniqueUpsertKeys(batch.Operations));
+        Assert.Contains("Duplicate upsert", ex.Message);
+    }
+
+    [Fact]
+    public void Update_with_complex_predicate_combining_contains_and_in_is_valid()
+    {
+        var ids = new[] { 1, 2, 3 };
+        var (sql, _) = Harness.GenerateSingle(b => b.Update<Item>(op =>
+            op.Where(x => ids.Contains(x.Id) && x.Key1.Contains("a") && (x.Key2 > 1 || !x.Key1.Contains("b"))).Set(x => x.Key3, 1)));
+        Assert.Contains("IN (", sql);
+        Assert.Contains("LIKE", sql);
+        Assert.Contains("OR", sql);
+    }
 }
