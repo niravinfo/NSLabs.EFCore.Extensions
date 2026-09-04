@@ -3,6 +3,9 @@
 This folder contains sample applications demonstrating all features of NSLabs.EFCore.Extensions. Layout is provider-consistent for future providers.
 
 ```bash
+# SQLite (zero-config, file DB) - auto-creates nsamples.db and runs all scenarios
+dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite
+
 # Windows (LocalDB) or Linux with env override - auto-creates DB and runs all scenarios
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 
@@ -23,11 +26,12 @@ samples/
     Dockerfile                                # Multi-stage build
     docker-compose.yml                        # mssql + samples (SQL Server only, no root compose)
     .dockerignore
+  NSLabs.EFCore.Extensions.Samples.Sqlite/  # Thin host: Program.cs + appsettings.json (UseSqlite, Data Source=nsamples.db)
   // future: NSLabs.EFCore.Extensions.Samples.Postgres/  # UseNpgsql, same Shared
 ```
 
 ### NSLabs.EFCore.Extensions.Samples.Shared
-Provider-agnostic scenarios (Basic/Advanced/Transaction/RealWorld/TableApiAndOptions) with isolated run via `DatabaseHelper.ClearAllAsync` — takes `SampleDbContext` + `ILogger`, no `UseSqlServer`. Reused by every provider host.
+Provider-agnostic scenarios (Basic/Advanced/Transaction/RealWorld/TableApiAndOptions) with isolated run via `DatabaseHelper.ClearAllAsync` — takes `SampleDbContext` + `ILogger`, no `UseSqlServer`/`UseSqlite`. Reused by every provider host.
 
 ### NSLabs.EFCore.Extensions.Samples.SqlServer
 Thin console host for SQL Server:
