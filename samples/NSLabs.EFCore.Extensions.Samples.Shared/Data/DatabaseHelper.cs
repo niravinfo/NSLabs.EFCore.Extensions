@@ -22,12 +22,15 @@ public static class DatabaseHelper
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [Customers]", cancellationToken);
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [Products]", cancellationToken);
 
-            // Identity reseed best-effort (SQL Server only, ignored on other providers)
-            try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Products]', RESEED, 0)", cancellationToken); } catch { }
-            try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Customers]', RESEED, 0)", cancellationToken); } catch { }
-            try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Orders]', RESEED, 0)", cancellationToken); } catch { }
-            try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[OrderItems]', RESEED, 0)", cancellationToken); } catch { }
-            try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[InventoryLogs]', RESEED, 0)", cancellationToken); } catch { }
+            // Identity reseed (SQL Server only; skipped on SQLite/other providers to avoid log noise)
+            if (db.Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")
+            {
+                try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Products]', RESEED, 0)", cancellationToken); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Customers]', RESEED, 0)", cancellationToken); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[Orders]', RESEED, 0)", cancellationToken); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[OrderItems]', RESEED, 0)", cancellationToken); } catch { }
+                try { await db.Database.ExecuteSqlRawAsync("DBCC CHECKIDENT ('[InventoryLogs]', RESEED, 0)", cancellationToken); } catch { }
+            }
 
             db.ChangeTracker.Clear();
             logger.LogDebug("Database cleared");

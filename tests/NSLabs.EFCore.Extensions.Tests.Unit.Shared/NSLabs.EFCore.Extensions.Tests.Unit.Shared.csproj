@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- Shared helper library: not a test project (no Test SDK / runner). -->
+  <ItemGroup>
+    <ProjectReference Include="..\NSLabs.EFCore.Extensions.Tests.Common\NSLabs.EFCore.Extensions.Tests.Common.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
+  </ItemGroup>
+
+</Project>

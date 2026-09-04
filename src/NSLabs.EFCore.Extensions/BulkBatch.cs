@@ -132,7 +132,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                 {
                     throw new InvalidOperationException(
                         $"Duplicate upsert match-key on '{table}' between operation #{collision.OpIndex} (row {collision.RowIndex}) " +
-                        $"and operation #{operation.GlobalIndex} (row {rowIndex}). SQL Server MERGE cannot affect the same row twice in one batch.");
+                        $"and operation #{operation.GlobalIndex} (row {rowIndex}). Bulk batch cannot affect the same row twice in one batch.");
                 }
 
                 bucket[key] = (operation.GlobalIndex, rowIndex);

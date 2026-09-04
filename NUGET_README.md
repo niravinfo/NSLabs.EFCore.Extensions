@@ -24,7 +24,14 @@ dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.SqlServer
 ```
 
-### PostgreSQL / MySQL / SQLite
+### SQLite
+
+```bash
+dotnet add package NSLabs.EFCore.Extensions
+dotnet add package NSLabs.EFCore.Extensions.Sqlite
+```
+
+### PostgreSQL / MySQL
 
 Coming soon. Provider support is being expanded.
 
@@ -107,9 +114,6 @@ The executor piggybacks on `Database.CurrentTransaction` and never commits/rollb
 ## Documentation & Support
 
 - **Full Documentation:** [Design & Architecture](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/DESIGN.md)
-- **Transaction Details:** [Transaction Semantics](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/TRANSACTIONS.md)
-- **Computed SET Support:** [Computed SET Documentation](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/COMPUTED_SET_SUPPORT.md)
-- **Testing Guide:** [Testing Documentation](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/TESTING.md)
 - **Sample Code:** [Working Examples](https://github.com/niravinfo/NSLabs.EFCore.Extensions/tree/main/samples)
 - **Issues & Feature Requests:** [GitHub Issues](https://github.com/niravinfo/NSLabs.EFCore.Extensions/issues)
 - **Source Code:** [GitHub Repository](https://github.com/niravinfo/NSLabs.EFCore.Extensions)

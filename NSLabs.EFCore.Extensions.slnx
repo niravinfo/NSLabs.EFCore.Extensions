@@ -2,13 +2,20 @@
   <Folder Name="/samples/">
     <Project Path="samples/NSLabs.EFCore.Extensions.Samples.Shared/NSLabs.EFCore.Extensions.Samples.Shared.csproj" />
     <Project Path="samples/NSLabs.EFCore.Extensions.Samples.SqlServer/NSLabs.EFCore.Extensions.Samples.SqlServer.csproj" />
+    <Project Path="samples/NSLabs.EFCore.Extensions.Samples.Sqlite/NSLabs.EFCore.Extensions.Samples.Sqlite.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/NSLabs.EFCore.Extensions/NSLabs.EFCore.Extensions.csproj" />
     <Project Path="src/NSLabs.EFCore.Extensions.SqlServer/NSLabs.EFCore.Extensions.SqlServer.csproj" />
+    <Project Path="src/NSLabs.EFCore.Extensions.Sqlite/NSLabs.EFCore.Extensions.Sqlite.csproj" />
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit/NSLabs.EFCore.Extensions.Tests.Unit.csproj" />
-    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Integration/NSLabs.EFCore.Extensions.Tests.Integration.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Common/NSLabs.EFCore.Extensions.Tests.Common.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit.Shared/NSLabs.EFCore.Extensions.Tests.Unit.Shared.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Integration.Shared/NSLabs.EFCore.Extensions.Tests.Integration.Shared.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit.SqlServer/NSLabs.EFCore.Extensions.Tests.Unit.SqlServer.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Unit.Sqlite/NSLabs.EFCore.Extensions.Tests.Unit.Sqlite.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Integration.SqlServer/NSLabs.EFCore.Extensions.Tests.Integration.SqlServer.csproj" />
+    <Project Path="tests/NSLabs.EFCore.Extensions.Tests.Integration.Sqlite/NSLabs.EFCore.Extensions.Tests.Integration.Sqlite.csproj" />
   </Folder>
 </Solution>

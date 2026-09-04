@@ -160,19 +160,19 @@ internal static class LinqPredicateTranslator
                     {
                         var pattern = Evaluate(call.Arguments[0]) as string;
                         if (pattern is null) throw new NotSupportedException("string.Contains with null pattern is not supported. Use == null check.");
-                        return new SqlLikeNode(property, $"%{EscapeLike(pattern)}%", SqlLikeKind.Contains);
+                        return new SqlLikeNode(property, pattern, SqlLikeKind.Contains);
                     }
                     case "StartsWith" when call.Arguments.Count == 1:
                     {
                         var pattern = Evaluate(call.Arguments[0]) as string;
                         if (pattern is null) throw new NotSupportedException("string.StartsWith with null pattern is not supported.");
-                        return new SqlLikeNode(property, $"{EscapeLike(pattern)}%", SqlLikeKind.StartsWith);
+                        return new SqlLikeNode(property, pattern, SqlLikeKind.StartsWith);
                     }
                     case "EndsWith" when call.Arguments.Count == 1:
                     {
                         var pattern = Evaluate(call.Arguments[0]) as string;
                         if (pattern is null) throw new NotSupportedException("string.EndsWith with null pattern is not supported.");
-                        return new SqlLikeNode(property, $"%{EscapeLike(pattern)}", SqlLikeKind.EndsWith);
+                        return new SqlLikeNode(property, pattern, SqlLikeKind.EndsWith);
                     }
                     case "Equals" when call.Arguments.Count == 1:
                     {

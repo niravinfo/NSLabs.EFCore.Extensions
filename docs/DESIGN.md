@@ -2,8 +2,8 @@
 
 **Batched conditional bulk update / upsert for Entity Framework Core**
 
-Status: In implementation — M0 done (API + translation + golden-SQL suite), M1 done (executor mechanics proven via fake ADO; live SQL Server Testcontainers suite ready, runs where Docker is available), M2 done (SQL Server MERGE upsert generation, per-op rowcounts, duplicate-key pre-validation; needs a live Testcontainers run where Docker exists)
-Target: SQL Server first; PostgreSQL / MySQL / SQLite to follow
+Status: Implemented — SQL Server and SQLite providers shipped (batched updates/deletes, MERGE / ON CONFLICT upserts, golden-SQL + live integration suites, samples for both providers).
+Target: SQL Server + SQLite supported; PostgreSQL / MySQL to follow.
 
 ---
 
@@ -51,7 +51,7 @@ Niche: "batch of heterogeneous conditional DML, single round trip, pure EF metad
 ### Primary Surface — Context-Level Multi-Table Batching
 
 Operations may span **multiple tables and operation kinds** (update / upsert / delete)
-in **one round trip** with caller-controlled transaction (no implicit transaction — caller must use `Database.BeginTransactionAsync()` when atomicity is needed — see `docs/TRANSACTIONS.md`). Statements execute strictly in submission
+in **one round trip** with caller-controlled transaction (no implicit transaction — caller must use `Database.BeginTransactionAsync()` when atomicity is needed — see `README.md#transactions`). Statements execute strictly in submission
 order, so callers control FK-safe sequencing exactly like raw SQL.
 
 ```csharp
@@ -85,7 +85,7 @@ await db.Items.BulkUpsertAsync(b => { ... });
 
 For complex business logic, operations can be accumulated step by step across methods
 and executed once at the end — one round trip, submission order preserved
-(order of Add calls = execution order, enabling FK-safe sequences; transaction is caller-controlled — see `docs/TRANSACTIONS.md`):
+(order of Add calls = execution order, enabling FK-safe sequences; transaction is caller-controlled — see `README.md#transactions`):
 
 ```csharp
 IBulkBatch batch = db.CreateBulkBatch();
@@ -188,7 +188,7 @@ public sealed class OperationResult
 ```
 
 Multi-table calls share the parameter budget (~2100 on SQL Server) across all operations;
-chunk boundaries may fall anywhere in the sequence. When wrapped in an ambient `Database.CurrentTransaction`, all chunks run inside that single transaction with order preserved; otherwise each statement uses its implicit per-statement transaction (see `docs/TRANSACTIONS.md`).
+chunk boundaries may fall anywhere in the sequence. When wrapped in an ambient `Database.CurrentTransaction`, all chunks run inside that single transaction with order preserved; otherwise each statement uses its implicit per-statement transaction (see `README.md#transactions`).
 
 Use case: `result.Operations[0].RowsAffected == 0` means that specific filter matched
 nothing — callers can confirm changes before replying to their users. Pairs with a planned
@@ -197,7 +197,7 @@ nothing — callers can confirm changes before replying to their users. Pairs wi
 ### Options Bag
 
 - Chunk size (parameter budget)
-- Transaction — caller-managed via `Database.BeginTransactionAsync()` for all-or-nothing (no implicit transaction — see `docs/TRANSACTIONS.md`)
+  - Transaction — caller-managed via `Database.BeginTransactionAsync()` for all-or-nothing (no implicit transaction — see `README.md#transactions`)
 - `throwIfZeroAffected` per-op verification (rollback only when inside an ambient transaction)
 - Command timeout
 - SQL logging hook
@@ -240,7 +240,7 @@ UPDATE [Items] SET [Key1] = @p3 WHERE [Key1] = @p4 AND [Key2] = @p5;
 
 - One `DbCommand`, one round trip; all values are parameters (never interpolated).
 - **Chunking** by parameter budget: SQL Server ~2100 params/request, MySQL & Npgsql ~65k
-  placeholders. An op with 4 params → ~500 ops/batch on SQL Server. All chunks run inside a single transaction only when the caller wraps with an ambient `Database.CurrentTransaction`; otherwise each chunk commits per-statement (see `docs/TRANSACTIONS.md`).
+  placeholders. An op with 4 params → ~500 ops/batch on SQL Server. All chunks run inside a single transaction only when the caller wraps with an ambient `Database.CurrentTransaction`; otherwise each chunk commits per-statement (see `README.md#transactions`).
 - Sequential semantics preserved naturally.
 - Per-op counts via appended captures streamed back in the same round trip:
 
@@ -343,7 +343,7 @@ samples/
 | **M1** | Batched UPDATE execution on SQL Server (chunking by param budget, ambient transaction reuse, per-op rowcounts) |
 | **M2** | Grouped MERGE upsert + duplicate-key pre-validation |
 | **M3** | PostgreSQL provider |
-| **M4** | MySQL + SQLite providers |
+| **M4** | SQLite provider (shipped); MySQL to follow |
 | **M5** | Staging-table fast path, benchmarks, docs polish |
 
 ---
@@ -358,4 +358,4 @@ samples/
 | Packaging | One package (`NSLabs.EFCore.Extensions`), all providers embedded |
 | NuGet id / namespace | `NSLabs.EFCore.Extensions` |
 | Entry points | `db.BulkExecuteAsync(...)` inline; `db.CreateBulkBatch()` deferred builder (accumulate anywhere, execute once); `db.Items.BulkUpdateAsync/BulkUpsertAsync` as single-table sugar |
-| Multi-table batching | Yes — one round trip across all operations; submission order defines execution and FK-safe sequencing; transaction is caller-controlled (no implicit transaction, respects `Database.CurrentTransaction` — see `docs/TRANSACTIONS.md`) |
+| Multi-table batching | Yes — one round trip across all operations; submission order defines execution and FK-safe sequencing; transaction is caller-controlled (no implicit transaction, respects `Database.CurrentTransaction` — see `README.md#transactions`) |

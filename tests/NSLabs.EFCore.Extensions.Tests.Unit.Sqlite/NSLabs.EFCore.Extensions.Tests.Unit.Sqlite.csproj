@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="NSLabs.EFCore.Extensions.Tests.Common" />
+    <Using Include="NSLabs.EFCore.Extensions.Tests.Unit.Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NSLabs.EFCore.Extensions.Tests.Common\NSLabs.EFCore.Extensions.Tests.Common.csproj" />
+    <ProjectReference Include="..\NSLabs.EFCore.Extensions.Tests.Unit.Shared\NSLabs.EFCore.Extensions.Tests.Unit.Shared.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions.Sqlite\NSLabs.EFCore.Extensions.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>

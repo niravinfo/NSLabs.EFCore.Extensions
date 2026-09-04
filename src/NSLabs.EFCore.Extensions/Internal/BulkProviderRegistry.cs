@@ -29,6 +29,16 @@ internal static class BulkProviderRegistry
             }
         }
 
+        if (providerName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            var loaded = TryLoadSqliteProvider();
+            if (loaded is not null)
+            {
+                _providers[providerName] = loaded;
+                return loaded;
+            }
+        }
+
         return null;
     }
 
@@ -37,6 +47,25 @@ internal static class BulkProviderRegistry
         try
         {
             const string typeName = "NSLabs.EFCore.Extensions.Internal.SqlServerProvider, NSLabs.EFCore.Extensions.SqlServer";
+            var type = Type.GetType(typeName, throwOnError: false);
+            if (type is null)
+            {
+                return null;
+            }
+
+            return Activator.CreateInstance(type) as IBulkProvider;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IBulkProvider? TryLoadSqliteProvider()
+    {
+        try
+        {
+            const string typeName = "NSLabs.EFCore.Extensions.Internal.SqliteProvider, NSLabs.EFCore.Extensions.Sqlite";
             var type = Type.GetType(typeName, throwOnError: false);
             if (type is null)
             {
