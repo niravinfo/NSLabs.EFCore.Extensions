@@ -2,7 +2,7 @@
 
 Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see [Transactions](#transactions)).
 
-SQL Server is supported first (batched parameterized script + `MERGE` for upserts). PostgreSQL / MySQL / SQLite providers are planned.
+SQL Server (batched parameterized script + `MERGE` for upserts) and SQLite (`INSERT ... ON CONFLICT` upserts, zero-config file DB) are supported. PostgreSQL / MySQL providers are planned.
 
 ## Why
 
@@ -17,7 +17,8 @@ This library: `N` heterogeneous `UPDATE` / `UPSERT` / `DELETE` across multiple t
 
 ```bash
 dotnet add package NSLabs.EFCore.Extensions
-dotnet add package NSLabs.EFCore.Extensions.SqlServer
+dotnet add package NSLabs.EFCore.Extensions.SqlServer   # SQL Server provider
+dotnet add package NSLabs.EFCore.Extensions.Sqlite      # SQLite provider
 ```
 
 Requires `.NET 10` and `Microsoft.EntityFrameworkCore` `10.0.0`.
@@ -71,20 +72,21 @@ var r = await batch.ExecuteAsync(ct);
 
 ## Documentation
 
-- **[Design & Architecture](docs/DESIGN.md)** — Full semantics, translation pipeline, and provider strategies
-- **[Transaction Semantics](docs/TRANSACTIONS.md)** — Detection, `HOLDLOCK`, `ThrowIfZeroAffected` interaction, migration from `AutoTransaction`
-- **[Computed SET Support](docs/COMPUTED_SET_SUPPORT.md)** — Computed column expressions in SET clauses
-- **[Testing Guide](docs/TESTING.md)** — Test structure and conventions
+- **[Design & Architecture](docs/DESIGN.md)** — Semantics, translation pipeline, and provider strategies
 
-## Sample Application
+## Sample Applications
 
-Provider-consistent layout for future Postgres/MySql (`Shared` + per-provider host):
+Provider-consistent layout (`Shared` + per-provider host):
 
 - `samples/NSLabs.EFCore.Extensions.Samples.Shared/` — provider-agnostic domain + scenarios (`Basic`/`Advanced`/`Transaction`/`RealWorld`/`TableApiAndOptions`) with isolated database clear before each run
 - `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/` — thin host (`Host` + `Microsoft.Extensions.Logging.Console`, `UseSqlServer`)
+- `samples/NSLabs.EFCore.Extensions.Samples.Sqlite/` — thin host (`UseSqlite`, `Data Source=nsamples.db`, zero-config)
 
-**Quick start (Windows / Linux):**
+**Quick start:**
 ```bash
+# SQLite (zero-config, file DB)
+dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite
+
 # Windows (LocalDB) or bare Linux with env override - DB auto-created via EnsureCreatedAsync
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 
@@ -120,8 +122,6 @@ await db.BulkExecuteAsync(b => { ... });
 ```
 
 The executor piggybacks on `Database.CurrentTransaction` (`command.Transaction = CurrentTransaction.GetDbTransaction()`) and never commits/rollbacks itself. `ThrowIfZeroAffected` is validated after all chunks — without a transaction prior chunks are already committed, with a transaction the caller can roll back.
-
-See the [Transaction Semantics](docs/TRANSACTIONS.md) documentation for complete details.
 
 ## Repository
 

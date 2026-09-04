@@ -132,11 +132,11 @@ ConnectionStrings__DefaultConnection="Server=YOUR_SERVER;Database=NSLabsSample;.
 ## Documentation
 
 - **SqlServer host**: `NSLabs.EFCore.Extensions.Samples.SqlServer/Program.cs`
+- **Sqlite host**: `NSLabs.EFCore.Extensions.Samples.Sqlite/Program.cs`
 - **Shared scenarios**: `NSLabs.EFCore.Extensions.Samples.Shared/Scenarios/`
 - **Docker**: `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/Dockerfile` + `docker-compose.yml` + `.dockerignore` (all co-located, SQL Server only)
 - **Main Library README**: [../README.md](../README.md)
 - **Design Details**: [../docs/DESIGN.md](../docs/DESIGN.md)
-- **Transaction Guide**: [../docs/TRANSACTIONS.md](../docs/TRANSACTIONS.md)
 
 ## 💡 Learning Path
 
