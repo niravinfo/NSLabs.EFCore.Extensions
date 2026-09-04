@@ -560,9 +560,40 @@ internal static class SqlServerSqlGenerator
         private string EmitLike(SqlLikeNode like, IEntityType entityType, string? alias)
         {
             var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(like.Property, entityType))}";
-            var param = EmitValue(like.PatternValue);
+            var raw = like.PatternValue as string ?? throw new NotSupportedException("LIKE pattern must be a string.");
+            var finalPattern = BuildLikePattern(raw, like.Kind);
+            var param = EmitValue(finalPattern);
             var op = like.Negated ? "NOT LIKE" : "LIKE";
             return $"{col} {op} {param}";
+        }
+
+        private static string BuildLikePattern(string raw, SqlLikeKind kind) => kind switch
+        {
+            SqlLikeKind.Contains => $"%{EscapeLikeServer(raw)}%",
+            SqlLikeKind.StartsWith => $"{EscapeLikeServer(raw)}%",
+            SqlLikeKind.EndsWith => $"%{EscapeLikeServer(raw)}",
+            SqlLikeKind.Like => raw,
+            _ => throw new NotSupportedException($"SqlLikeKind '{kind}' is not supported.")
+        };
+
+        private static string EscapeLikeServer(string pattern)
+        {
+            if (pattern.IndexOf('[') < 0 && pattern.IndexOf('%') < 0 && pattern.IndexOf('_') < 0)
+            {
+                return pattern;
+            }
+
+            var sb = StringBuilderCache.Acquire(pattern.Length + 8);
+            for (var i = 0; i < pattern.Length; i++)
+            {
+                var c = pattern[i];
+                if (c == '[') sb.Append("[[]");
+                else if (c == '%') sb.Append("[%]");
+                else if (c == '_') sb.Append("[_]");
+                else sb.Append(c);
+            }
+
+            return StringBuilderCache.GetStringAndRelease(sb);
         }
 
         private string EmitIn(SqlInNode inNode, IEntityType entityType, string? alias)

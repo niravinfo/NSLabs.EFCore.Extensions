@@ -2,14 +2,14 @@
 
   <PropertyGroup>
     <RootNamespace>NSLabs.EFCore.Extensions</RootNamespace>
-    <PackageId>NSLabs.EFCore.Extensions.SqlServer</PackageId>
-    <Description>SQL Server provider for NSLabs.EFCore.Extensions</Description>
+    <PackageId>NSLabs.EFCore.Extensions.Sqlite</PackageId>
+    <Description>SQLite provider for NSLabs.EFCore.Extensions</Description>
     <NoWarn>CA2255</NoWarn>
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
   </ItemGroup>
 
   <ItemGroup>

@@ -121,14 +121,23 @@ secrets.json
 appsettings.secrets.json
 *.pem
 
-# Local databases
+# Local databases (note: never use bare "*.sqlite" - on case-insensitive
+# filesystems it ignores the ...Sqlite project directories entirely)
 *.mdf
 *.ldf
 *.ndf
 *.db
 *.db-shm
 *.db-wal
-*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite-journal
+
+# Never ignore the Sqlite provider / test projects
+!src/NSLabs.EFCore.Extensions.Sqlite/
+!tests/NSLabs.EFCore.Extensions.Tests.Unit.Sqlite/
+!tests/NSLabs.EFCore.Extensions.Tests.Integration.Sqlite/
 
 # Node (if tooling ever needs it)
 node_modules/

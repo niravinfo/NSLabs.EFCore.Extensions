@@ -12,9 +12,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit" />
-    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Common" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit.Shared" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.Shared" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit.SqlServer" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit.Sqlite" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.SqlServer" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.Sqlite" />
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.SqlServer" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Sqlite" />
   </ItemGroup>
 
 </Project>
