@@ -2,8 +2,8 @@
 
 **Batched conditional bulk update / upsert for Entity Framework Core**
 
-Status: Implemented — SQL Server and SQLite providers shipped (batched updates/deletes, MERGE / ON CONFLICT upserts, golden-SQL + live integration suites, samples for both providers).
-Target: SQL Server + SQLite supported; PostgreSQL / MySQL to follow.
+Status: Implemented — SQL Server, SQLite, and PostgreSQL (Npgsql) providers shipped (batched updates/deletes, MERGE / ON CONFLICT upserts, golden-SQL + live integration suites, samples for all providers).
+Target: SQL Server + SQLite + PostgreSQL supported; MySQL to follow.
 
 ---
 
@@ -342,7 +342,7 @@ samples/
 | **M0** | Solution skeleton: fluent builders (`BulkUpdateBuilder`, `UpsertBuilder`), op model, metadata binder, `IBulkOperationExecutor` abstraction, SqlServer strategy stub, unit test project with golden-SQL snapshot harness |
 | **M1** | Batched UPDATE execution on SQL Server (chunking by param budget, ambient transaction reuse, per-op rowcounts) |
 | **M2** | Grouped MERGE upsert + duplicate-key pre-validation |
-| **M3** | PostgreSQL provider |
+| **M3** | PostgreSQL provider (shipped: `NSLabs.EFCore.Extensions.Npgsql`, `ON CONFLICT` upserts, `65535` param cap, `TRUE` booleans, qualified `"Table"."Col"` guards/computed) |
 | **M4** | SQLite provider (shipped); MySQL to follow |
 | **M5** | Staging-table fast path, benchmarks, docs polish |
 

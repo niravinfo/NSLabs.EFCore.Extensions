@@ -2,7 +2,7 @@
 
 Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see [Transactions](#transactions)).
 
-SQL Server (batched parameterized script + `MERGE` for upserts) and SQLite (`INSERT ... ON CONFLICT` upserts, zero-config file DB) are supported. PostgreSQL / MySQL providers are planned.
+SQL Server (batched parameterized script + `MERGE` for upserts), SQLite (`INSERT ... ON CONFLICT` upserts, zero-config file DB), and PostgreSQL (`INSERT ... ON CONFLICT` upserts via Npgsql) are supported. MySQL is planned.
 
 ## Why
 
@@ -19,6 +19,7 @@ This library: `N` heterogeneous `UPDATE` / `UPSERT` / `DELETE` across multiple t
 dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.SqlServer   # SQL Server provider
 dotnet add package NSLabs.EFCore.Extensions.Sqlite      # SQLite provider
+dotnet add package NSLabs.EFCore.Extensions.Npgsql      # PostgreSQL provider
 ```
 
 Requires `.NET 10` and `Microsoft.EntityFrameworkCore` `10.0.0`.
@@ -81,11 +82,17 @@ Provider-consistent layout (`Shared` + per-provider host):
 - `samples/NSLabs.EFCore.Extensions.Samples.Shared/` — provider-agnostic domain + scenarios (`Basic`/`Advanced`/`Transaction`/`RealWorld`/`TableApiAndOptions`) with isolated database clear before each run
 - `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/` — thin host (`Host` + `Microsoft.Extensions.Logging.Console`, `UseSqlServer`)
 - `samples/NSLabs.EFCore.Extensions.Samples.Sqlite/` — thin host (`UseSqlite`, `Data Source=nsamples.db`, zero-config)
+- `samples/NSLabs.EFCore.Extensions.Samples.Npgsql/` — thin host (`UseNpgsql`, `Host=localhost;Port=5432;...`, `postgres:17` via compose)
 
 **Quick start:**
 ```bash
 # SQLite (zero-config, file DB)
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite
+
+# PostgreSQL (Docker, no manual DB setup, DB auto-created via EnsureCreatedAsync)
+docker compose -f samples/NSLabs.EFCore.Extensions.Samples.Npgsql/docker-compose.yml up --build
+# or host run against local PG:
+dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Npgsql
 
 # Windows (LocalDB) or bare Linux with env override - DB auto-created via EnsureCreatedAsync
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer

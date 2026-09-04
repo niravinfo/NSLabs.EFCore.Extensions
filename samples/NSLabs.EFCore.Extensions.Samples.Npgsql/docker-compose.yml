@@ -1,0 +1,32 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: "postgres"
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_DB: "nsamples"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nsamples"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  samples:
+    build:
+      context: ../..
+      dockerfile: samples/NSLabs.EFCore.Extensions.Samples.Npgsql/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Inside compose network, host is `postgres`. Override for host run: Host=localhost
+      ConnectionStrings__DefaultConnection: "Host=postgres;Port=5432;Database=nsamples;Username=postgres;Password=postgres"
+    restart: "no"
+
+volumes:
+  postgres_data:
