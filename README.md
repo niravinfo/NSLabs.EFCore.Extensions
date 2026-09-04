@@ -44,7 +44,7 @@ var result = await db.BulkExecuteAsync(b =>
 });
 
 // per-op counts (SQL Server)
-result.Operations[0].RowsAffected
+result.Operations[0].RowsAffected;
 ```
 
 ### Simple helper when you only use one table
@@ -61,6 +61,25 @@ await db.Items.BulkUpdateAsync(b =>
 // also works with a list of items
 await db.Items.BulkUpdateAsync(new[] { e1, e2 });
 ```
+
+### Atomic (server-side computed) updates
+
+Pass a value *expression* instead of a constant and it runs inside the `UPDATE` — no read-modify-write round-trip, safe under concurrency:
+
+```csharp
+await db.BulkExecuteAsync(b =>
+{
+    // increment in place: SET "Key2" = ("Key2" + @p0)
+    b.Update<Item>(op => op.Where(x => x.Id == 6)
+                           .Set(x => x.Key2, x => x.Key2 + 1));
+
+    // arithmetic on current value: SET "Amount" = ("Amount" * @p0)
+    b.Update<Order>(op => op.Where(x => x.OrderNo == "O-1")
+                            .Set(x => x.Amount, x => x.Amount * 1.1m));
+});
+```
+
+Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`), conditionals (`? :`), coalesce (`??`), string methods (`ToUpper/ToLower/Trim/Substring/Replace/Concat`), `Math` (`Abs/Ceiling/Floor/Round/Truncate`) — same as EF Core `ExecuteUpdate`'s `SetProperty`. Works in upsert `Set(...)` too (applies to the matched-row update).
 
 ### Deferred builder
 
