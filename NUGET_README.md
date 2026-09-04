@@ -31,7 +31,14 @@ dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.Sqlite
 ```
 
-### PostgreSQL / MySQL
+### PostgreSQL
+
+```bash
+dotnet add package NSLabs.EFCore.Extensions
+dotnet add package NSLabs.EFCore.Extensions.Npgsql
+```
+
+### MySQL
 
 Coming soon. Provider support is being expanded.
 

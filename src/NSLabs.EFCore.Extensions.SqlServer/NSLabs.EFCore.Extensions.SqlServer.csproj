@@ -24,6 +24,8 @@
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit.Sqlite" />
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.SqlServer" />
     <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.Sqlite" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Unit.Npgsql" />
+    <InternalsVisibleTo Include="NSLabs.EFCore.Extensions.Tests.Integration.Npgsql" />
   </ItemGroup>
 
 </Project>
