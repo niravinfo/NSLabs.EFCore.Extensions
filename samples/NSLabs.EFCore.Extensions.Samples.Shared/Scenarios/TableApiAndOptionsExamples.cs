@@ -10,9 +10,9 @@ public static class TableApiAndOptionsExamples
     public static async Task RunAllAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("=== TABLE API AND OPTIONS EXAMPLES ===");
-        
+
         await DatabaseHelper.ClearAllAsync(db, logger);
-        
+
         await Example1_TableApiAsync(db, logger);
         await Example2_DeferredBatchAsync(db, logger);
         await Example3_EntityRowsAsync(db, logger);
@@ -23,7 +23,9 @@ public static class TableApiAndOptionsExamples
     private static async Task Example1_TableApiAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 1: Table API BulkUpdateAsync / BulkUpsertAsync");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
+
         db.Products.Add(new Product
         {
             Sku = $"TAPI-{suffix}",
@@ -34,7 +36,7 @@ public static class TableApiAndOptionsExamples
             Category = "Test",
             LastRestocked = DateTime.UtcNow
         });
-        
+
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -45,19 +47,37 @@ public static class TableApiAndOptionsExamples
 
         logger.LogInformation("BulkUpdateAsync rows={Rows}", r1.TotalRowsAffected);
 
-        var r2 = await db.Customers.BulkUpsertAsync(b =>
+        var reading = new EnergyReading
         {
-            b.Add(op => op.On(c => c.Email).Values(new Customer { Email = $"tapi.{suffix}@example.com", Name = "TableApi", IsActive = true, LoyaltyPoints = 0, CreatedAt = DateTime.UtcNow }));
+            MeterId = $"MTR-TAPI-{suffix}",
+            Date = DateTime.UtcNow.Date,
+            ConsumptionKwh = 18.42,
+            RecordedAt = DateTime.UtcNow
+        };
+
+        var r2 = await db.EnergyReadings.BulkUpsertAsync(b =>
+        {
+            b.Add(op => op
+                .MatchOn(r => new { r.MeterId, r.Date })
+                .Update(r => r.ConsumptionKwh, reading.ConsumptionKwh)
+                .Update(r => r.RecordedAt, reading.RecordedAt)
+                .Insert(reading));
         });
-        
+
         logger.LogInformation("BulkUpsertAsync rows={Rows}", r2.TotalRowsAffected);
         db.ChangeTracker.Clear();
+
+        var saved = await db.EnergyReadings
+            .AsNoTracking()
+            .SingleAsync(r => r.MeterId == reading.MeterId && r.Date == reading.Date);
+
+        logger.LogInformation("Meter {Meter} {Kwh} kWh", saved.MeterId, saved.ConsumptionKwh);
     }
 
     private static async Task Example2_DeferredBatchAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 2: Deferred CreateBulkBatch");
-        
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
         var sku = $"DEFER-{suffix}";
         db.Products.Add(new Product
@@ -71,7 +91,7 @@ public static class TableApiAndOptionsExamples
             Category = "Test",
             LastRestocked = DateTime.UtcNow
         });
-        
+
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -80,31 +100,66 @@ public static class TableApiAndOptionsExamples
         batch.Update<Product>(op => op.Where(p => p.Sku == sku).Set(p => p.StockQuantity, 99));
 
         var r = await batch.ExecuteAsync();
+
         logger.LogInformation("Deferred batch ops={Ops} rows={Rows}", r.Operations.Count, r.TotalRowsAffected);
+
         db.ChangeTracker.Clear();
     }
 
     private static async Task Example3_EntityRowsAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 3: Entity-row style Update(IEnumerable)");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
-        var p1 = new Product { Sku = $"EROW1-{suffix}", Name = "Row1", Price = 5m, StockQuantity = 1, IsActive = true, Category = "Test", LastRestocked = DateTime.UtcNow };
-        var p2 = new Product { Sku = $"EROW2-{suffix}", Name = "Row2", Price = 6m, StockQuantity = 1, IsActive = true, Category = "Test", LastRestocked = DateTime.UtcNow };
+        var p1 = new Product
+        {
+            Sku = $"EROW1-{suffix}",
+            Name = "Row1",
+            Price = 5m,
+            StockQuantity = 1,
+            IsActive = true,
+            Category = "Test",
+            LastRestocked = DateTime.UtcNow
+        };
+
+        var p2 = new Product
+        {
+            Sku = $"EROW2-{suffix}",
+            Name = "Row2",
+            Price = 6m,
+            StockQuantity = 1,
+            IsActive = true,
+            Category = "Test",
+            LastRestocked = DateTime.UtcNow
+        };
+
         db.Products.AddRange(p1, p2);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
         p1.Price = 50m; p2.Price = 60m;
         var r = await db.BulkExecuteAsync(b => { b.Update(new[] { p1, p2 }); });
+
         logger.LogInformation("Entity rows update rows={Rows}", r.TotalRowsAffected);
 
-        var p3 = new Product { Sku = $"EROW3-{suffix}", Name = "Row3", Price = 7m, StockQuantity = 1, IsActive = true, Category = "Test", LastRestocked = DateTime.UtcNow };
+        var p3 = new Product
+        {
+            Sku = $"EROW3-{suffix}",
+            Name = "Row3",
+            Price = 7m,
+            StockQuantity = 1,
+            IsActive = true,
+            Category = "Test",
+            LastRestocked = DateTime.UtcNow
+        };
+
         db.Products.Add(p3);
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
-        
+
         p3.Price = 70m;
         var r2 = await db.BulkExecuteAsync(b => { b.Update(new[] { p3 }, (row, x) => x.Sku == row.Sku); });
+
         logger.LogInformation("Custom match rows={Rows}", r2.TotalRowsAffected);
         db.ChangeTracker.Clear();
     }
@@ -112,6 +167,7 @@ public static class TableApiAndOptionsExamples
     private static async Task Example4_OptionsChunkingAndLoggingAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 4: Options MaxParametersPerCommand + OnCommandText + CommandTimeout");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
         for (var i = 0; i < 5; i++)
         {
@@ -149,7 +205,7 @@ public static class TableApiAndOptionsExamples
                 logger.LogDebug("Generated SQL chunk length {Len}", sql.Length);
             }
         });
-        
+
         logger.LogInformation("Chunked batch chunks={Chunks} rows={Rows}", logs.Count, result.TotalRowsAffected);
 
         foreach (var op in result.Operations)
@@ -163,9 +219,21 @@ public static class TableApiAndOptionsExamples
     private static async Task Example5_ThrowIfZeroAffectedAsync(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 5: ThrowIfZeroAffected");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
         var sku = $"ZERO-{suffix}";
-        db.Products.Add(new Product { Sku = sku, Name = "Zero", Price = 10m, StockQuantity = 1, IsActive = true, Category = "Test", LastRestocked = DateTime.UtcNow });
+
+        db.Products.Add(new Product
+        {
+            Sku = sku,
+            Name = "Zero",
+            Price = 10m,
+            StockQuantity = 1,
+            IsActive = true,
+            Category = "Test",
+            LastRestocked = DateTime.UtcNow
+        });
+
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
@@ -187,9 +255,15 @@ public static class TableApiAndOptionsExamples
         {
             _ = await db.BulkExecuteAsync(b =>
             {
-                b.Update<Product>(op => op.Where(p => p.Sku == sku).Set(p => p.Price, 12m));
-                b.Update<Product>(op => op.Where(p => p.Sku == $"NOPE2-{suffix}").Set(p => p.Price, 99m));
+                b.Update<Product>(op => op
+                    .Where(p => p.Sku == sku)
+                    .Set(p => p.Price, 12m));
+
+                b.Update<Product>(op => op
+                    .Where(p => p.Sku == $"NOPE2-{suffix}")
+                    .Set(p => p.Price, 99m));
             }, new BulkExecuteOptions { ThrowIfZeroAffected = true });
+
             await tx.CommitAsync();
         }
         catch (BulkZeroRowsAffectedException ex)
@@ -197,7 +271,7 @@ public static class TableApiAndOptionsExamples
             await tx.RollbackAsync();
             logger.LogInformation("Rolled back atomically due to zero-affected op {Idx}", ex.OperationIndex);
         }
-        
+
         db.ChangeTracker.Clear();
     }
 }

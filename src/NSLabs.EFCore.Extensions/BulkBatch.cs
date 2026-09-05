@@ -246,7 +246,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             ? ResolveConflictProperties(builder.ConflictTarget, entityType)
             : entityType.FindPrimaryKey()?.Properties.ToList()
               ?? throw new InvalidOperationException(
-                  $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' requires On(...) because the entity has no primary key.");
+                  $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' requires MatchOn(...) because the entity has no primary key.");
 
         var discriminator = entityType.FindDiscriminatorProperty();
         object? discriminatorValue = null;
@@ -290,14 +290,14 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             if (conflictSetForCheck.Contains(property))
             {
                 throw new InvalidOperationException(
-                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': Set(...) cannot target conflict column '{property.Name}'.");
+                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': Update(...) cannot target conflict column '{property.Name}'.");
             }
 
             if (!assignedUpsertColumns.Add(property))
             {
                 throw new InvalidOperationException(
                     $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}' assigns '{property.Name}' more than once; " +
-                    "combine the calls into a single Set(...) per column.");
+                    "combine the calls into a single Update(...) per column.");
             }
 
             if (valueExpression is not null)
@@ -314,7 +314,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             }
         }
 
-        // Explicit Set(...) values form the matched-update payload; otherwise the full row
+        // Explicit Update(...) values form the matched-update payload; otherwise the full row
         // (minus conflict and generated columns) is written back — EF Core pattern: manual loop + HashSet for Contains
         List<IProperty> updateColumns;
         if (builder.Sets.Count > 0)
@@ -349,7 +349,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             if (!hasMatchedUpdatePayload)
             {
                 throw new InvalidOperationException(
-                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': WhenMatched(...) guards the matched update, but there is nothing to update; add Set(...) or non-key columns.");
+                    $"Upsert operation #{operation.GlobalIndex} on '{entityType.DisplayName()}': UpdateWhen(...) guards the matched update, but there is nothing to update; add Update(...) or non-key columns.");
             }
 
             spec.Guard = LinqPredicateTranslator.Translate(builder.Guard, entityType, builder.Guard.Parameters[0]);

@@ -34,7 +34,7 @@ internal sealed class BoundUpsertSpec
     /// <summary>All columns carried in the MERGE source, in emission order.</summary>
     public required List<IProperty> InsertColumns { get; init; }
 
-    /// <summary>Columns written on match when no explicit Set(...) payload exists.</summary>
+    /// <summary>Columns written on match when no explicit Update(...) payload exists.</summary>
     public required List<IProperty> UpdateColumns { get; init; }
 
     public SqlNode? Guard { get; set; }

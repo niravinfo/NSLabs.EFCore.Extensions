@@ -3,10 +3,10 @@
 This folder contains sample applications demonstrating all features of NSLabs.EFCore.Extensions. Layout is provider-consistent for future providers.
 
 ```bash
-# SQLite (zero-config, file DB) - auto-creates nsamples.db and runs all scenarios
+# SQLite (zero-config, file DB) - drops + recreates nsamples.db from the current model, then runs all scenarios
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite
 
-# Windows (LocalDB) or Linux with env override - auto-creates DB and runs all scenarios
+# Windows (LocalDB) or Linux with env override - drops + recreates the DB, then runs all scenarios
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 
 # One-click Docker (Linux/Windows/Mac) - builds image, starts SQL Server, runs all scenarios (only sample logs)
@@ -20,7 +20,7 @@ docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-comp
 ```
 samples/
   README.md
-  NSLabs.EFCore.Extensions.Samples.Shared/    # Shared domain (Product/Customer/Order) + Scenarios
+  NSLabs.EFCore.Extensions.Samples.Shared/    # Shared domain (Product/Customer/Order/DailyArticleViews/EnergyReading) + Scenarios
     Models/ Data/ Scenarios/
   NSLabs.EFCore.Extensions.Samples.SqlServer/ # Thin host: Program.cs + appsettings.json (UseSqlServer)
     Dockerfile                                # Multi-stage build
@@ -44,7 +44,7 @@ Thin console host for SQL Server:
 1. **Basic Examples** (5 examples)
    - Simple bulk update
    - Update with predicates
-   - Bulk upsert
+   - Atomic bulk upsert (page-view counter)
    - Bulk delete
    - Multiple sets on same entity
 
@@ -60,18 +60,19 @@ Thin console host for SQL Server:
    - Mixed with SaveChanges
    - Rollback on error
 
-4. **Real-World Examples** (4 examples)
+4. **Real-World Examples** (5 examples)
    - Inventory restock workflow
    - Order fulfillment workflow
    - Dynamic pricing by category
    - Customer loyalty batch processing
+   - Smart meter sync (upsert batch)
 
 5. **Table API and Options** (chunking, ThrowIfZeroAffected, CreateBulkBatch)
 
 ## 🛠️ Requirements
 
 - **.NET 10 SDK**
-- **SQL Server** (LocalDB, Express, Docker, or full version) - DB is auto-created on first run
+- **SQL Server** (LocalDB, Express, Docker, or full version) - DB is dropped + recreated from the current model on every run (rerunnable with zero setup)
 
 ### Option 1: LocalDB (Windows - zero config)
 

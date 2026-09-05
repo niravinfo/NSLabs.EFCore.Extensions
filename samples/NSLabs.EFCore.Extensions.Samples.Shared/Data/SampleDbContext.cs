@@ -20,6 +20,10 @@ public class SampleDbContext : DbContext
     
     public DbSet<InventoryLog> InventoryLogs => Set<InventoryLog>();
 
+    public DbSet<DailyArticleViews> DailyArticleViews => Set<DailyArticleViews>();
+
+    public DbSet<EnergyReading> EnergyReadings => Set<EnergyReading>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         // Product configuration
@@ -84,6 +88,25 @@ public class SampleDbContext : DbContext
             entity.Property(e => e.Action).HasMaxLength(50).IsRequired();
             entity.Property(e => e.Notes).HasMaxLength(500);
             entity.HasIndex(e => e.ProductId);
+        });
+
+        // DailyArticleViews configuration: one counter row per (article, day).
+        // The composite UNIQUE index is the upsert conflict target on PG/SQLite
+        // (SQL Server MERGE needs no constraint, but the index documents intent).
+        modelBuilder.Entity<DailyArticleViews>(entity =>
+        {
+            entity.ToTable("DailyArticleViews");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.ArticleId, e.Date }).IsUnique();
+        });
+
+        // EnergyReading configuration: one reading per (meter, day).
+        modelBuilder.Entity<EnergyReading>(entity =>
+        {
+            entity.ToTable("EnergyReadings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.MeterId).HasMaxLength(50).IsRequired();
+            entity.HasIndex(e => new { e.MeterId, e.Date }).IsUnique();
         });
     }
 }

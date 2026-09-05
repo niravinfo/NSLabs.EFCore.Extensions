@@ -29,6 +29,7 @@ Requires `.NET 10` and `Microsoft.EntityFrameworkCore` `10.0.0`.
 ### Bulk batch (multi-table, single round-trip)
 
 ```csharp
+var today = DateTime.UtcNow.Date;
 var result = await db.BulkExecuteAsync(b =>
 {
     b.Update<Item>(op => op.Where(x => x.Id == 6)
@@ -38,9 +39,11 @@ var result = await db.BulkExecuteAsync(b =>
     b.Update<Order>(op => op.Where(x => x.Status == OrderStatus.Pending)
                             .Set(x => x.Status, OrderStatus.Shipped));
 
-    b.Upsert<Customer>(u => u.On(x => x.Code)
-                             .WhenMatched(x => x.Active)
-                             .Values(new Customer { Code = "A", Name = "X" }));
+    // Atomic page-view counter: row exists -> Views + 1 inside the UPDATE;
+    // row missing -> insert with Views = 1. No read-modify-write round-trip.
+    b.Upsert<DailyArticleViews>(u => u.MatchOn(v => new { v.ArticleId, v.Date })
+                                      .Update(v => v.Views, v => v.Views + 1)
+                                      .Insert(new DailyArticleViews { ArticleId = 42, Date = today, Views = 1 }));
 });
 
 // per-op counts (SQL Server)
@@ -126,10 +129,21 @@ Bulk operations **do not create a transaction** (matches `EFCore.BulkExtensions`
 
 ```csharp
 // 1. No transaction (default) — each statement commits individually
+var reading = new EnergyReading
+{
+    MeterId = "MTR-1001",
+    Date = DateTime.UtcNow.Date,
+    ConsumptionKwh = 18.42,
+    RecordedAt = DateTime.UtcNow
+};
+
 var r = await db.BulkExecuteAsync(b =>
 {
     b.Update<Item>(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "V1"));
-    b.Upsert<Customer>(u => u.On(x => x.Code).Values(customer));
+    b.Upsert<EnergyReading>(u => u.MatchOn(m => new { m.MeterId, m.Date })
+                                  .Update(m => m.ConsumptionKwh, reading.ConsumptionKwh)
+                                  .Update(m => m.RecordedAt, reading.RecordedAt)
+                                  .Insert(reading));
 });
 
 // 2. Caller-managed transaction — atomic

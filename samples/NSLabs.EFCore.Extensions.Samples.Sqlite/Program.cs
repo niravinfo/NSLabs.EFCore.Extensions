@@ -74,7 +74,10 @@ static async Task EnsureDatabaseAsync(IServiceScopeFactory scopeFactory, ILogger
     var db = scope.ServiceProvider.GetRequiredService<SampleDbContext>();
     try
     {
-        // EnsureCreated is idempotent: creates file + schema if not exists, no-op otherwise.
+        // Fresh database on every run: drop if it exists, then recreate the full
+        // schema from the current model. Rerunnable with zero setup, and new
+        // entities always get their tables — no manual steps, no raw SQL.
+        await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
         logger.LogInformation("Database ready");
     }

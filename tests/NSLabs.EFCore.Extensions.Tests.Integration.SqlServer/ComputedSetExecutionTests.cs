@@ -278,9 +278,9 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Orders.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.OrderNo)
-                    .Set(x => x.Amount, x => x.Amount * 1.1m)
-                    .Values(new Order { OrderNo = orderNo, Amount = 999m, Status = OrderStatus.Shipped })));
+                .Add(u => u.MatchOn(x => x.OrderNo)
+                    .Update(x => x.Amount, x => x.Amount * 1.1m)
+                    .Insert(new Order { OrderNo = orderNo, Amount = 999m, Status = OrderStatus.Shipped })));
 
             Assert.Equal(1, result.TotalRowsAffected);
         }
@@ -308,9 +308,9 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             await context.Items.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Id)
-                    .Set(x => x.Key2, x => x.Key2 + x.Key3)
-                    .Values(new Item { Id = itemId, Key1 = "ups", Key2 = 999, Key3 = 999 })));
+                .Add(u => u.MatchOn(x => x.Id)
+                    .Update(x => x.Key2, x => x.Key2 + x.Key3)
+                    .Insert(new Item { Id = itemId, Key1 = "ups", Key2 = 999, Key3 = 999 })));
         }
 
         await using var verify = Fixture.CreateContext();
@@ -332,10 +332,10 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .WhenMatched(x => !x.Active)
-                    .Set(x => x.Name, x => x.Name + "_suffix")
-                    .Values(new Customer { Code = code, Name = "Ignored" })));
+                .Add(u => u.MatchOn(x => x.Code)
+                    .UpdateWhen(x => !x.Active)
+                    .Update(x => x.Name, x => x.Name + "_suffix")
+                    .Insert(new Customer { Code = code, Name = "Ignored" })));
 
             Assert.Equal(0, result.Operations[0].RowsAffected);
         }
@@ -352,10 +352,10 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .WhenMatched(x => !x.Active)
-                    .Set(x => x.Name, x => x.Name + "_suffix")
-                    .Values(new Customer { Code = code, Name = "Ignored" })));
+                .Add(u => u.MatchOn(x => x.Code)
+                    .UpdateWhen(x => !x.Active)
+                    .Update(x => x.Name, x => x.Name + "_suffix")
+                    .Insert(new Customer { Code = code, Name = "Ignored" })));
 
             Assert.Equal(1, result.Operations[0].RowsAffected);
         }
@@ -372,9 +372,9 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Orders.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.OrderNo)
-                    .Set(x => x.Amount, x => x.Amount * 2m)
-                    .Values(new Order { OrderNo = orderNo, Amount = 50m, Status = OrderStatus.Pending })));
+                .Add(u => u.MatchOn(x => x.OrderNo)
+                    .Update(x => x.Amount, x => x.Amount * 2m)
+                    .Insert(new Order { OrderNo = orderNo, Amount = 50m, Status = OrderStatus.Pending })));
 
             Assert.Equal(1, result.TotalRowsAffected);
         }
@@ -399,10 +399,10 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .Set(x => x.Name, x => x.Name + "_upd")
-                    .Set(x => x.Active, true)
-                    .Values(new Customer { Code = codeExisting, Name = "Ignored", Active = false })));
+                .Add(u => u.MatchOn(x => x.Code)
+                    .Update(x => x.Name, x => x.Name + "_upd")
+                    .Update(x => x.Active, true)
+                    .Insert(new Customer { Code = codeExisting, Name = "Ignored", Active = false })));
 
             Assert.Equal(1, result.TotalRowsAffected);
         }
@@ -410,9 +410,9 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .Set(x => x.Name, x => x.Name + "_upd")
-                    .Values(new[]
+                .Add(u => u.MatchOn(x => x.Code)
+                    .Update(x => x.Name, x => x.Name + "_upd")
+                    .Insert(new[]
                     {
                         new Customer { Code = codeExisting, Name = "Old2", Active = false },
                         new Customer { Code = codeNew, Name = "New", Active = true }
@@ -488,7 +488,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
             {
                 b.Update<Item>(op => op.Where(x => x.Id == itemId).Set(x => x.Key2, x => x.Key2 * 10));
                 b.Update<Order>(op => op.Where(x => x.OrderNo == orderNo).Set(x => x.Amount, x => x.Amount + 5m));
-                b.Upsert<Customer>(u => u.On(x => x.Code).Values(new Customer { Code = "COMP-MULTI-C", Name = "Hi", Active = true }));
+                b.Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(new Customer { Code = "COMP-MULTI-C", Name = "Hi", Active = true }));
             });
 
             Assert.Equal(3, result.TotalRowsAffected);

@@ -92,7 +92,7 @@ public class NpgsqlComputedSetGoldenSqlTests
     [Fact]
     public void Upsert_computed_uses_qualified_column()
     {
-        var (sql, _) = NpgsqlHarness.GenerateSingle(b => b.Upsert<Customer>(u => u.On(x => x.Code).Set(x => x.Name, x => x.Name + "_upd").Values(new Customer { Code = "A", Name = "X" })));
+        var (sql, _) = NpgsqlHarness.GenerateSingle(b => b.Upsert<Customer>(u => u.MatchOn(x => x.Code).Update(x => x.Name, x => x.Name + "_upd").Insert(new Customer { Code = "A", Name = "X" })));
         Assert.Contains("\"Name\" = (\"Customers\".\"Name\" || @p", sql);
         Assert.DoesNotContain("[t].", sql);
     }

@@ -1,6 +1,6 @@
 # Proposal: Redesign the Upsert Public API (builder surface only)
 
-Status: Proposed — no code changed. Awaiting naming approval.
+Status: Implemented — `MatchOn` / `Update` / `UpdateWhen` (optional) / `Insert` shipped across `src`, `tests`, `samples`, `README`/`NUGET_README`/`DESIGN`. Verified: full build 0 errors; unit suites 107 SqlServer + 38 Sqlite + 39 Npgsql (golden SQL byte-identical → engine untouched); live integration 28 Sqlite + 73 SqlServer + 15 Npgsql.
 Freedom: library has no users yet, 1.0.0 unreleased → clean break allowed, no `[Obsolete]` aliases needed.
 
 ---
@@ -33,29 +33,30 @@ FlexLabs parity check (wiki `Usage`, verified): their `Upsert(entity)` ≈ our `
 
 ---
 
-## 3. Proposal: rename one method, reorder the story, document the rules
+## 3. Proposal: rename full builder surface, reorder the story, document the rules
 
 ### 3.1 The change (builder surface only)
 
 Running example for this section (used for both scripts below): nightly supplier-feed sync over the sample model (`Samples.Shared` `Product`: UNIQUE `Sku`, `Price`, `StockQuantity`, `IsActive`). New SKUs get inserted; existing ones get price/stock refresh — except discontinued products, which humans deliberately deactivated and the feed must not resurrect. That exception is the guard's entire reason to exist: without it, every re-sync would overwrite rows people intentionally changed.
 
 ```csharp
-// AFTER (proposed)
-b.Upsert<Product>(u => u.On(p => p.Sku)                 // 1. identity: UNIQUE Sku defines "same row" (omit → PK)
-                         .Set(p => p.Price, feed.Price) // 2. matched: refresh price + stock only...
-                         .Set(p => p.StockQuantity, feed.Stock)
-                         .WhereMatched(p => p.IsActive) // 3. ...but hands off discontinued rows
-                         .Insert(feedRow));             // 4. not matched: insert the whole row (Name, Category, ...)
+// AFTER (approved)
+b.Upsert<Product>(u => u.MatchOn(p => p.Sku)              // 1. identity: UNIQUE Sku defines "same row" (omit → PK)
+                         // .MatchOn(p => new { p.Sku, p.Category }) // composite form
+                         .Update(p => p.Price, feed.Price) // 2. matched: refresh price + stock only (one call per column, chain for many)
+                         .Update(p => p.StockQuantity, feed.Stock)
+                         .UpdateWhen(p => p.IsActive)     // 3. optional guard: hands off discontinued rows (omit → always update on match)
+                         .Insert(feedRow));               // 4. not matched: insert the whole row (Name, Category, ...); Insert(rows) for many
 ```
 
-Naming decisions:
+Naming decisions (approved):
 
-| Slot | Now | Proposed | Why |
-|------|-----|----------|-----|
-| Conflict target | `On` | **keep `On`** | Identical to FlexLabs (incl. PK default) — the one name we got right; zero migration cost |
-| Matched writes | `Set` | **keep `Set`** | Mirrors our own `Update` builder's `Set` + EF `SetProperty`; per-column const/computed. Renaming buys nothing once the guard is fixed |
-| Guard | `WhenMatched` | **rename → `WhereMatched`** | The actual collision (P1). Parallels `Update.Where`, reads as a filter; `UpdateWhere`/`OnlyWhenMatched` are fallbacks |
-| Insert rows | `Values` | **rename → `Insert`** | `Values` names the SQL clause, not the job — it never signalled "this is the insert path". `Insert(row)` / `Insert(rows)` reads as the counterpart to `Set` (matched-write vs insert-row). `InsertValues` (the `DESIGN.md`-era name) is the fallback |
+| Slot | Now (`BulkOperationBuilders.cs`) | Approved | Why |
+|------|----------------------------------|----------|-----|
+| Conflict target | `On` | **rename → `MatchOn`** | Says what it does (how to find existing row). Selector-only, FlexLabs-style: `p => p.Sku` single, `p => new { ... }` composite. Key value is NOT passed separately — it is sliced from the `Insert` row prefix (`BulkBatch.cs:261-266, 374-379`), matching native `MERGE ON t.C = s.C` / `ON CONFLICT (C)` semantics on all three providers (verified: no provider supports a compare value distinct from the insert row) |
+| Matched writes | `Set` | **rename → `Update`** | Per-column const/computed, one call per column (chaining = many columns). Whole-object shapes rejected deliberately: a runtime object can't distinguish unset vs intentional `0`/`null`; per-column selectors explicitly mark dirty columns |
+| Guard | `WhenMatched` | **rename → `UpdateWhen`** | Fixes the FlexLabs collision (P1): theirs = update shape, ours = boolean filter. Reads as "update only when…", maps to `WHEN MATCHED AND` (SQL Server) / `DO UPDATE ... WHERE` (PG/SQLite). Optional |
+| Insert rows | `Values` | **rename → `Insert`** | `Values` never signalled "insert if not found". `Insert(row)` / `Insert(rows)` names the `WHEN NOT MATCHED THEN INSERT` branch |
 
 `DbSet.BulkUpsertAsync(b => b.Add(u => ...))` table API is unaffected (forwards to the same builder).
 
@@ -84,39 +85,39 @@ ON CONFLICT ("Sku") DO UPDATE SET "Price" = @p7, "StockQuantity" = @p8 WHERE "Is
 -- same params as above. PG emits WHERE "Products"."IsActive" = TRUE instead.
 ```
 
-Reading the scripts proves the four slots: `On` → the `ON`/`ON CONFLICT` arbiter; `Set` → the matched-write list (`@p7/@p8`, deliberately *different* params from the insert row); `WhereMatched` → the `AND`/`WHERE` gate; `Insert` → the `VALUES` row + `WHEN NOT MATCHED ... INSERT` branch.
+Reading the scripts proves the four slots: `MatchOn` → the `ON`/`ON CONFLICT` arbiter; `Update` → the matched-write list (`@p7/@p8`, deliberately *different* params from the insert row); `UpdateWhen` → the `AND`/`WHERE` gate; `Insert` → the `VALUES` row + `WHEN NOT MATCHED ... INSERT` branch.
 
 ### 3.2 What is NOT changing
 
 - Engine: `BulkBatch.BindUpsert`, all three generators, all three executors — **zero edits**. Proof: existing golden-SQL suites must pass byte-identical after the rename (only call sites change).
-- `On` semantics incl. PK default and composite `On(x => new { ... })`.
+- `MatchOn` semantics incl. PK default and composite `MatchOn(x => new { ... })`; key value always comes from the `Insert` row (no separate compare value on any provider).
 - Guard-without-payload error, conflict-col-write error, dup-key validation, zero-row no-op chunk.
-- `SetProperty` aliases on both builders.
+- `Update`-builder `Set`/`SetProperty` untouched. Upsert-builder `Set`/`SetProperty` → `Update` (alias shape decided at implementation; default is `Update` + `SetProperty` kept for EF parity unless it confuses).
 
 ### 3.3 README contract to write (the rules, stated plainly)
 
-1. `Values` rows carry **both** the lookup key and the insert payload; `On` names which columns of the row form the lookup.
-2. No `Set` → match rewrites the row from `Values` (minus keys). With `Set` → match writes only `Set` (may differ entirely from insert).
-3. `WhereMatched` (ex-guard) filters *whether* a found row updates; `false` → row untouched, counts 0 for that row.
-4. Conflict columns need a real UNIQUE/PK on PG + SQLite; `Set` can't target them.
-5. Computed `Set` sees the *target* row; `excluded.`-style refs unsupported explicitly (default path uses them implicitly).
+1. `Insert` rows carry **both** the lookup key and the insert payload; `MatchOn` names which columns of the row form the lookup (never a separate value).
+2. No `Update` → match rewrites the row from `Insert` (minus keys). With `Update` → match writes only `Update` (may differ entirely from insert).
+3. `UpdateWhen` is optional and filters *whether* a found row updates; `false` → row untouched, counts 0 for that row. It never blocks the insert branch.
+4. Conflict columns need a real UNIQUE/PK on PG + SQLite; `Update` can't target them.
+5. Computed `Update` sees the *target* row; `excluded.`-style refs unsupported explicitly (default path uses them implicitly).
 
 ---
 
-## 4. Touchpoint inventory (rename `WhenMatched` → `WhereMatched`, `Values` → `Insert`)
+## 4. Touchpoint inventory (rename `On` → `MatchOn`, `Set` → `Update`, `WhenMatched` → `UpdateWhen`, `Values` → `Insert`)
 
-`Values` call sites are numerous (~80 across unit + integration + samples: every upsert test and both sample hosts) but the rename is mechanical (same overload shapes: single row + `IEnumerable<T>`). `WhenMatched` sites (~15, listed before) likewise.
+All four renames are mechanical (same overload shapes: `MatchOn` selector-only single/composite; `Update` per-column const + computed; `UpdateWhen` single predicate; `Insert` single row + `IEnumerable<T>`). No test-logic edits.
 
-- `src/`: 1 declaration (`BulkOperationBuilders.cs:66`) + 1 use (`BulkBatch.cs:349-355` reads `builder.Guard`; error text at `:352` mentions `WhenMatched(...)` — update text)
-- `tests/`: ~15 call sites — `Unit.SqlServer` (`UpsertGoldenSqlTests:78`, `ComputedSetGoldenSqlTests:260`, `UpsertExecutionTests:152,156`, `ComputedSetExecutionTests:336,356`), `Unit.Sqlite` (`SqliteUpsertGoldenSqlTests:28`), `Unit.Npgsql` (`NpgsqlUpsertGoldenSqlTests:28`), `Integration.Npgsql` (`NpgsqlUpsertExecutionTests:55`)
-- `samples/`: 0 uses of `WhenMatched` (only `On`+`Values`) — no change
-- Docs: `README.md` quick-start + §3 story example, `NUGET_README.md` if mirrored, `docs/DESIGN.md:156-168` upsert section (also still shows stale `.InsertValues(...)` name — fix to `.Values(...)` in passing)
+- `src/`: declarations in `BulkOperationBuilders.cs` (`On:59`, `WhenMatched:66`, `Set:73,80`, `SetProperty:88-89`, `Values:91,98`) + 1 use (`BulkBatch.cs:349-355` reads `builder.Guard`; error text at `:352` mentions `WhenMatched(...)` — update to `UpdateWhen(...)`)
+- `tests/`: `Values` sites ~80 (every upsert test); `WhenMatched` sites ~15 — `Unit.SqlServer` (`UpsertGoldenSqlTests:78`, `ComputedSetGoldenSqlTests:260`, `UpsertExecutionTests:152,156`, `ComputedSetExecutionTests:336,356`), `Unit.Sqlite` (`SqliteUpsertGoldenSqlTests:28`), `Unit.Npgsql` (`NpgsqlUpsertGoldenSqlTests:28`), `Integration.Npgsql` (`NpgsqlUpsertExecutionTests:55`); plus `On`/`Set` sites in the same files
+- `samples/`: 0 uses of `WhenMatched` (only `On`+`Values`) — rename to `MatchOn`+`Insert`
+- Docs: `README.md` quick-start + §3 story example, `NUGET_README.md` if mirrored, `docs/DESIGN.md:156-168` upsert section (also still shows stale `.InsertValues(...)` name — fix to `.Insert(...)` in passing)
 
 ---
 
-## 5. Rollout plan (after naming approval)
+## 5. Rollout plan (naming approved — implement)
 
-1. Rename `WhenMatched` → approved guard name and `Values` → approved insert name in `BulkOperationBuilders.cs` + `BulkBatch.cs:352` error text.
+1. Rename in `BulkOperationBuilders.cs`: `On` → `MatchOn`, `Set` → `Update`, `WhenMatched` → `UpdateWhen`, `Values` → `Insert` (+ decide `SetProperty` alias); update `BulkBatch.cs:352` error text to `UpdateWhen(...)`.
 2. Mechanical rename at all call sites (§4); no test-logic edits.
 3. Rewrite `README.md` upsert example in story order (§3.1 AFTER) + add §3.3 contract block; mirror to `NUGET_README.md`; fix `DESIGN.md` upsert API block (incl. stale `InsertValues`).
 4. Verify: full build + all unit suites (golden SQL byte-identical proves engine untouched) + SQLite integration (no-Docker) + Npgsql/SQL Server integration where Docker available.
@@ -124,8 +125,10 @@ Reading the scripts proves the four slots: `On` → the `ON`/`ON CONFLICT` arbit
 
 ---
 
-## 6. Open decisions (need your call)
+## 6. Open decisions (resolved, pending D3)
 
-- D1: guard name — `WhereMatched` (recommended) vs `UpdateWhere` vs `OnlyWhenMatched`?
-- D2: insert name — `Insert` (recommended: reads as the counterpart to `Set`) vs keep `Values` vs `InsertValues` (the `DESIGN.md`-era name)?
-- D3: docs-only for §3.3, or also XML-doc the four slots on the builder methods themselves? (Recommend: both — XML docs are cheap and travel with IntelliSense.)
+- D1: conflict target — decided `MatchOn` (selector-only, single/composite; value from `Insert` row).
+- D2: matched writes — decided `Update` (per-column, chain for many; whole-object shapes rejected).
+- D3: guard name — decided `UpdateWhen` (optional; `WHEN MATCHED AND` / `WHERE`).
+- D4: insert name — decided `Insert` (`row` + `IEnumerable<T>`; `WHEN NOT MATCHED THEN INSERT` branch).
+- D5: docs-only for §3.3, or also XML-doc the four slots on the builder methods themselves? (Recommend: both — XML docs are cheap and travel with IntelliSense.)

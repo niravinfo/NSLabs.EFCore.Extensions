@@ -55,6 +55,7 @@ in **one round trip** with caller-controlled transaction (no implicit transactio
 order, so callers control FK-safe sequencing exactly like raw SQL.
 
 ```csharp
+var today = DateTime.UtcNow.Date;
 var r = await db.BulkExecuteAsync(b =>
 {
     b.Update<Item>(op => op.Where(x => x.Id == 6)
@@ -66,9 +67,11 @@ var r = await db.BulkExecuteAsync(b =>
     b.Update<Order>(op => op.Where(x => x.Status == OrderStatus.Pending)
                             .Set(x => x.Status, OrderStatus.Shipped));
 
-    b.Upsert<Customer>(u => u.On(x => x.Code)
-                             .WhenMatched(x => x.Active)
-                             .Values(new Customer { Code = "A", Name = "X" }));
+    // Atomic page-view counter: row exists -> Views + 1 inside the UPDATE;
+    // row missing -> insert with Views = 1.
+    b.Upsert<DailyArticleViews>(u => u.MatchOn(v => new { v.ArticleId, v.Date })
+                                      .Update(v => v.Views, v => v.Views + 1)
+                                      .Insert(new DailyArticleViews { ArticleId = 42, Date = today, Views = 1 }));
 
     b.Delete<AuditLog>(op => op.Where(x => x.Created < cutoff));   // future op type
 });
@@ -159,11 +162,14 @@ Conflict target defaults to PK; per-op guard optional.
 ```csharp
 await db.Items.BulkUpsertAsync(b =>
 {
+    // Nightly smart-meter sync: match refreshes only the two feed columns;
+    // a missing (meter, day) row inserts the whole reading instead.
+    // Optional `.UpdateWhen(...)` gates the matched update only (never the insert).
     b.Add(op => op
-        .On(x => new { x.Code })            // conflict target
-        .WhenMatched(x => x.Status != 9)    // optional guard
-        .Set(x => x.Key1, "V")
-        .InsertValues(new Item { Code = "A", Key1 = "V" })); // row for NOT-MATCHED case
+        .MatchOn(r => new { r.MeterId, r.Date }) // conflict target (omit → PK); key value comes from the Insert row
+        .Update(r => r.ConsumptionKwh, reading.ConsumptionKwh) // matched-write payload, one call per column
+        .Update(r => r.RecordedAt, reading.RecordedAt)
+        .Insert(reading)); // row for NOT-MATCHED case
 });
 ```
 

@@ -388,9 +388,9 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .Set(x => x.Name, x => x.Name + "_upd")
-                    .Values(new Customer { Code = codeExisting, Name = "Ignored" })));
+                .Add(u => u.MatchOn(x => x.Code)
+                    .Update(x => x.Name, x => x.Name + "_upd")
+                    .Insert(new Customer { Code = codeExisting, Name = "Ignored" })));
             Assert.Equal(1, result.TotalRowsAffected);
         }
 
@@ -409,9 +409,9 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         await using (var context2 = Fixture.CreateContext())
         {
             var result = await context2.Items.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Id)
-                    .Set(x => x.Key2, x => x.ParentId ?? 99)
-                    .Values(new Item { Id = itemIdExisting, Key2 = 999, ParentId = 123 })));
+                .Add(u => u.MatchOn(x => x.Id)
+                    .Update(x => x.Key2, x => x.ParentId ?? 99)
+                    .Insert(new Item { Id = itemIdExisting, Key2 = 999, ParentId = 123 })));
             Assert.Equal(1, result.TotalRowsAffected);
         }
 
@@ -423,9 +423,9 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         await using (var context3 = Fixture.CreateContext())
         {
             var result = await context3.Items.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Id)
-                    .Set(x => x.Key2, x => x.ParentId ?? 99)
-                    .Values(new Item { Id = itemIdNew, Key2 = 77, ParentId = 55 })));
+                .Add(u => u.MatchOn(x => x.Id)
+                    .Update(x => x.Key2, x => x.ParentId ?? 99)
+                    .Insert(new Item { Id = itemIdNew, Key2 = 77, ParentId = 55 })));
             Assert.Equal(1, result.TotalRowsAffected);
         }
 
@@ -448,9 +448,9 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         await using (var context = Fixture.CreateContext())
         {
             await context.Customers.BulkUpsertAsync(b => b
-                .Add(u => u.On(x => x.Code)
-                    .Set(x => x.Name, x => x.Active ? x.Name + "_a" : x.Name + "_b")
-                    .Values(new Customer { Code = code, Name = "Ignored" })));
+                .Add(u => u.MatchOn(x => x.Code)
+                    .Update(x => x.Name, x => x.Active ? x.Name + "_a" : x.Name + "_b")
+                    .Insert(new Customer { Code = code, Name = "Ignored" })));
         }
 
         await using var verify = Fixture.CreateContext();
