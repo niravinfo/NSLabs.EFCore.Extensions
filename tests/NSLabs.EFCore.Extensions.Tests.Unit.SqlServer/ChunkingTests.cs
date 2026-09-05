@@ -68,8 +68,8 @@ public class ChunkingTests
     {
         var chunks = Harness.Generate(
             b => b.Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .Values(new[]
+                .MatchOn(x => x.Code)
+                .Insert(new[]
                 {
                     new Customer { Code = "A" },
                     new Customer { Code = "B" },
@@ -93,8 +93,8 @@ public class ChunkingTests
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Harness.Generate(
             b => b.Upsert<Item>(u => u
-                .On(x => x.Id)
-                .Values(new Item { Id = 1 })),
+                .MatchOn(x => x.Id)
+                .Insert(new Item { Id = 1 })),
             new BulkExecuteOptions { MaxParametersPerCommand = 3 }));
 
         Assert.Contains("single upsert row", ex.Message);
@@ -109,8 +109,8 @@ public class ChunkingTests
             {
                 b.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, "u"));
                 b.Upsert<Customer>(u => u
-                    .On(x => x.Code)
-                    .Values(Enumerable.Range(0, 5).Select(i => new Customer { Code = $"C{i}" }).ToArray()));
+                    .MatchOn(x => x.Code)
+                    .Insert(Enumerable.Range(0, 5).Select(i => new Customer { Code = $"C{i}" }).ToArray()));
             },
             new BulkExecuteOptions { MaxParametersPerCommand = 7 });
 

@@ -56,28 +56,28 @@ public sealed class UpsertOperationBuilder<TEntity> where TEntity : class
 
     internal List<TEntity> Rows { get; } = [];
 
-    public UpsertOperationBuilder<TEntity> On<TConflict>(Expression<Func<TEntity, TConflict>> conflictTarget)
+    public UpsertOperationBuilder<TEntity> MatchOn<TConflict>(Expression<Func<TEntity, TConflict>> conflictTarget)
     {
         ArgumentNullException.ThrowIfNull(conflictTarget);
         ConflictTarget = conflictTarget;
         return this;
     }
 
-    public UpsertOperationBuilder<TEntity> WhenMatched(Expression<Func<TEntity, bool>> guard)
+    public UpsertOperationBuilder<TEntity> UpdateWhen(Expression<Func<TEntity, bool>> guard)
     {
         ArgumentNullException.ThrowIfNull(guard);
         Guard = guard;
         return this;
     }
 
-    public UpsertOperationBuilder<TEntity> Set<TValue>(Expression<Func<TEntity, TValue>> selector, TValue value)
+    public UpsertOperationBuilder<TEntity> Update<TValue>(Expression<Func<TEntity, TValue>> selector, TValue value)
     {
         ArgumentNullException.ThrowIfNull(selector);
         Sets.Add((selector, value, null));
         return this;
     }
 
-    public UpsertOperationBuilder<TEntity> Set<TValue>(Expression<Func<TEntity, TValue>> selector, Expression<Func<TEntity, TValue>> valueExpression)
+    public UpsertOperationBuilder<TEntity> Update<TValue>(Expression<Func<TEntity, TValue>> selector, Expression<Func<TEntity, TValue>> valueExpression)
     {
         ArgumentNullException.ThrowIfNull(selector);
         ArgumentNullException.ThrowIfNull(valueExpression);
@@ -86,16 +86,16 @@ public sealed class UpsertOperationBuilder<TEntity> where TEntity : class
     }
 
     public UpsertOperationBuilder<TEntity> SetProperty<TValue>(Expression<Func<TEntity, TValue>> selector, Expression<Func<TEntity, TValue>> valueExpression)
-        => Set(selector, valueExpression);
+        => Update(selector, valueExpression);
 
-    public UpsertOperationBuilder<TEntity> Values(TEntity row)
+    public UpsertOperationBuilder<TEntity> Insert(TEntity row)
     {
         ArgumentNullException.ThrowIfNull(row);
         Rows.Add(row);
         return this;
     }
 
-    public UpsertOperationBuilder<TEntity> Values(IEnumerable<TEntity> rows)
+    public UpsertOperationBuilder<TEntity> Insert(IEnumerable<TEntity> rows)
     {
         ArgumentNullException.ThrowIfNull(rows);
         Rows.AddRange(rows);

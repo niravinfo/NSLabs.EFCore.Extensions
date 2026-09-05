@@ -18,8 +18,8 @@ public class ValidationTests
         using var context = CreateContext();
         var batch = new BulkBatch(context);
         batch.Upsert<Customer>(u => u
-            .On(x => x.Code)
-            .Values(
+            .MatchOn(x => x.Code)
+            .Insert(
                 new[]
                 {
                     new Customer { Code = "DUP", Name = "First" },
@@ -39,8 +39,8 @@ public class ValidationTests
         using var context = CreateContext();
         var batch = new BulkBatch(context);
         batch.Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key1, "x"));
-        batch.Upsert<Customer>(u => u.On(x => x.Code).Values(new Customer { Code = "DUP" }));
-        batch.Upsert<Customer>(u => u.On(x => x.Code).Values(new[] { new Customer { Code = "OTHER" }, new Customer { Code = "DUP" } }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(new Customer { Code = "DUP" }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(new[] { new Customer { Code = "OTHER" }, new Customer { Code = "DUP" } }));
 
         var ex = Assert.Throws<InvalidOperationException>(() => BulkBatch.ValidateUniqueUpsertKeys(batch.Operations));
 
@@ -54,10 +54,10 @@ public class ValidationTests
         using var context = CreateContext();
         var batch = new BulkBatch(context);
         batch.Upsert<Customer>(u => u
-            .On(x => x.Code)
-            .Values(new[] { new Customer { Code = "A" }, new Customer { Code = "B" } }));
+            .MatchOn(x => x.Code)
+            .Insert(new[] { new Customer { Code = "A" }, new Customer { Code = "B" } }));
         // Same table, different shape: validated independently.
-        batch.Upsert<Customer>(u => u.On(x => new { x.Name }).Values(new Customer { Name = "N" }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => new { x.Name }).Insert(new Customer { Name = "N" }));
 
         BulkBatch.ValidateUniqueUpsertKeys(batch.Operations);
     }
@@ -84,7 +84,7 @@ public class ValidationTests
     {
         using var context = CreateContext();
         var batch = new BulkBatch(context);
-        batch.Upsert<Customer>(u => u.On(x => x.Code).Values(new[] { new Customer { Code = "DUP" }, new Customer { Code = "DUP" } }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(new[] { new Customer { Code = "DUP" }, new Customer { Code = "DUP" } }));
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => batch.ExecuteAsync());
 
@@ -142,9 +142,9 @@ public class ValidationTests
     {
         var ex = Assert.Throws<InvalidOperationException>(() => Harness.GenerateSingle(b => b
             .Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .Set(x => x.Code, "X")
-                .Values(new Customer { Code = "A" }))));
+                .MatchOn(x => x.Code)
+                .Update(x => x.Code, "X")
+                .Insert(new Customer { Code = "A" }))));
 
         Assert.Contains("conflict column 'Code'", ex.Message);
     }
@@ -164,8 +164,8 @@ public class ValidationTests
     {
         using var context = CreateContext();
         var batch = new BulkBatch(context);
-        batch.Upsert<Customer>(u => u.On(x => new { x.Code, x.Name }).Values(new Customer { Code = "C", Name = "N" }));
-        batch.Upsert<Customer>(u => u.On(x => new { x.Code, x.Name }).Values(new Customer { Code = "C", Name = "N" }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => new { x.Code, x.Name }).Insert(new Customer { Code = "C", Name = "N" }));
+        batch.Upsert<Customer>(u => u.MatchOn(x => new { x.Code, x.Name }).Insert(new Customer { Code = "C", Name = "N" }));
 
         var ex = Assert.Throws<InvalidOperationException>(() => BulkBatch.ValidateUniqueUpsertKeys(batch.Operations));
         Assert.Contains("Duplicate upsert", ex.Message);

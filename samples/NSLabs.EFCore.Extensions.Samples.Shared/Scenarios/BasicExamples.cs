@@ -21,8 +21,11 @@ public static class BasicExamples
     private static async Task Example1_SimpleBulkUpdate(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 1: Simple Bulk Update");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
+
         var sku = $"LAPTOP-{suffix}";
+
         var product = new Product
         {
             Sku = sku,
@@ -36,8 +39,15 @@ public static class BasicExamples
 
         db.Products.Add(product);
         await db.SaveChangesAsync();
+
         db.ChangeTracker.Clear();
-        logger.LogInformation("Created product {Name} Id={Id} Sku={Sku} Price={Price}", product.Name, product.Id, sku, product.Price);
+
+        logger.LogInformation(
+            "Created product {Name} Id={Id} Sku={Sku} Price={Price}",
+            product.Name,
+            product.Id,
+            sku,
+            product.Price);
 
         var result = await db.BulkExecuteAsync(batch =>
         {
@@ -47,19 +57,29 @@ public static class BasicExamples
                 .Set(p => p.LastRestocked, DateTime.UtcNow));
         });
 
-        logger.LogInformation("Updated product price. RowsAffected={Total} Operations={Count}", result.TotalRowsAffected, result.Operations.Count);
+        logger.LogInformation(
+            "Updated product price. RowsAffected={Total} Operations={Count}",
+            result.TotalRowsAffected,
+            result.Operations.Count);
+
         foreach (var op in result.Operations)
+        {
             logger.LogInformation("Op {Entity} Rows={Rows}", op.EntityType, op.RowsAffected);
+        }
 
         db.ChangeTracker.Clear();
+
         var updated = await db.Products.AsNoTracking().FirstAsync(p => p.Id == product.Id);
+
         logger.LogInformation("Verified new price: {Price}", updated.Price);
     }
 
     private static async Task Example2_BulkUpdateWithPredicate(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 2: Bulk Update with Predicate");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
+
         var products = new[]
         {
             new Product { Sku = $"MOUSE-{suffix}", Name = "Wireless Mouse", Price = 29.99m, StockQuantity = 0, IsActive = true, Category = "Accessories", LastRestocked = DateTime.UtcNow },
@@ -69,8 +89,12 @@ public static class BasicExamples
 
         db.Products.AddRange(products);
         await db.SaveChangesAsync();
+
         db.ChangeTracker.Clear();
-        logger.LogInformation("Created {Count} products with zero stock", products.Length);
+
+        logger.LogInformation(
+            "Created {Count} products with zero stock",
+            products.Length);
 
         var result = await db.BulkExecuteAsync(batch =>
         {
@@ -79,60 +103,72 @@ public static class BasicExamples
                 .Set(p => p.IsActive, false));
         });
 
-        logger.LogInformation("Deactivated out-of-stock products. RowsAffected={Rows}", result.TotalRowsAffected);
+        logger.LogInformation(
+            "Deactivated out-of-stock products. RowsAffected={Rows}",
+            result.TotalRowsAffected);
+
         db.ChangeTracker.Clear();
-        var inactiveCount = await db.Products.CountAsync(p => !p.IsActive && p.Sku.Contains(suffix));
+
+        var inactiveCount = await db.Products
+            .CountAsync(p => !p.IsActive && p.Sku.Contains(suffix));
+
         logger.LogInformation("Total inactive for this batch: {Count}", inactiveCount);
     }
 
     private static async Task Example3_BulkUpsert(SampleDbContext db, ILogger logger)
     {
-        logger.LogInformation("Example 3: Bulk Upsert (Insert or Update)");
-        var suffix = Guid.NewGuid().ToString("N")[..6];
-        var email = $"john.doe.{suffix}@example.com";
+        logger.LogInformation("Example 3: Atomic Upsert (page-view counter)");
+        var today = DateTime.UtcNow.Date;
+        const int articleId = 42;
 
+        // First view of the day: no row for (42, today) -> INSERT with Views = 1.
         var result1 = await db.BulkExecuteAsync(batch =>
         {
-            batch.Upsert<Customer>(op => op
-                .On(c => c.Email)
-                .Values(new Customer
-                {
-                    Email = email,
-                    Name = "John Doe",
-                    IsActive = true,
-                    LoyaltyPoints = 0,
-                    CreatedAt = DateTime.UtcNow
-                }));
+            batch.Upsert<DailyArticleViews>(op => op
+                .MatchOn(v => new { v.ArticleId, v.Date })
+                .Update(v => v.Views, v => v.Views + 1)
+                .Insert(new DailyArticleViews { ArticleId = articleId, Date = today, Views = 1 }));
         });
-        logger.LogInformation("First upsert inserted. RowsAffected={Rows}", result1.TotalRowsAffected);
+
+        logger.LogInformation(
+            "First view inserted. RowsAffected={Rows}",
+            result1.TotalRowsAffected);
+
         db.ChangeTracker.Clear();
 
-        var result2 = await db.BulkExecuteAsync(batch =>
+        // Three more page views: each one atomically increments the same row
+        // inside the UPDATE (no read-modify-write round-trip, safe under concurrency).
+        for (var i = 0; i < 3; i++)
         {
-            batch.Upsert<Customer>(op => op
-                .On(c => c.Email)
-                .Set(c => c.LoyaltyPoints, 100)
-                .Values(new Customer
-                {
-                    Email = email,
-                    Name = "John Doe",
-                    IsActive = true,
-                    LoyaltyPoints = 0,
-                    CreatedAt = DateTime.UtcNow
-                }));
-        });
-        logger.LogInformation("Second upsert updated. RowsAffected={Rows}", result2.TotalRowsAffected);
-        db.ChangeTracker.Clear();
-        var customer = await db.Customers.AsNoTracking().FirstAsync(c => c.Email == email);
-        logger.LogInformation("Customer {Name} Points={Points}", customer.Name, customer.LoyaltyPoints);
+            await db.BulkExecuteAsync(batch =>
+            {
+                batch.Upsert<DailyArticleViews>(op => op
+                    .MatchOn(v => new { v.ArticleId, v.Date })
+                    .Update(v => v.Views, v => v.Views + 1)
+                    .Insert(new DailyArticleViews { ArticleId = articleId, Date = today, Views = 1 }));
+            });
+
+            db.ChangeTracker.Clear();
+        }
+
+        var counter = await db.DailyArticleViews
+            .AsNoTracking()
+            .SingleAsync(v => v.ArticleId == articleId && v.Date == today);
+
+        logger.LogInformation(
+            "Article {Article} views today: {Views} (expected 4)",
+            articleId,
+            counter.Views);
     }
 
     private static async Task Example4_BulkDelete(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 4: Bulk Delete");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
         var anchor = await db.Products.AsNoTracking().FirstOrDefaultAsync();
         var anchorId = anchor?.Id ?? 1;
+
         var logs = new[]
         {
             new InventoryLog { ProductId = anchorId, Action = "Restock", QuantityChange = 100, NewQuantity = 100, Timestamp = DateTime.UtcNow.AddDays(-90), Notes = suffix },
@@ -142,8 +178,13 @@ public static class BasicExamples
 
         db.InventoryLogs.AddRange(logs);
         await db.SaveChangesAsync();
+
         db.ChangeTracker.Clear();
-        logger.LogInformation("Created {Count} inventory logs with suffix {Suffix}", logs.Length, suffix);
+
+        logger.LogInformation(
+            "Created {Count} inventory logs with suffix {Suffix}",
+            logs.Length,
+            suffix);
 
         var cutoffDate = DateTime.UtcNow.AddDays(-30);
         var result = await db.BulkExecuteAsync(batch =>
@@ -151,8 +192,13 @@ public static class BasicExamples
             batch.Delete<InventoryLog>(op => op
                 .Where(log => log.Timestamp < cutoffDate && log.Notes == suffix));
         });
-        logger.LogInformation("Deleted old logs. RowsAffected={Rows}", result.TotalRowsAffected);
+
+        logger.LogInformation(
+            "Deleted old logs. RowsAffected={Rows}",
+            result.TotalRowsAffected);
+
         db.ChangeTracker.Clear();
+
         var remainingCount = await db.InventoryLogs.CountAsync(x => x.Notes == suffix);
         logger.LogInformation("Remaining logs with suffix: {Count}", remainingCount);
     }
@@ -160,6 +206,7 @@ public static class BasicExamples
     private static async Task Example5_MultipleSetsOnSameEntity(SampleDbContext db, ILogger logger)
     {
         logger.LogInformation("Example 5: Multiple Sets on Same Entity");
+
         var suffix = Guid.NewGuid().ToString("N")[..6];
         var sku = $"TABLET-{suffix}";
         var product = new Product
@@ -175,6 +222,7 @@ public static class BasicExamples
 
         db.Products.Add(product);
         await db.SaveChangesAsync();
+
         db.ChangeTracker.Clear();
         logger.LogInformation("Created product {Name} Sku={Sku}", product.Name, sku);
 
@@ -187,9 +235,19 @@ public static class BasicExamples
                 .Set(p => p.IsActive, true)
                 .Set(p => p.LastRestocked, DateTime.UtcNow));
         });
+
         logger.LogInformation("Updated multiple fields. RowsAffected={Rows}", result.TotalRowsAffected);
+
         db.ChangeTracker.Clear();
-        var updated = await db.Products.AsNoTracking().FirstAsync(p => p.Id == product.Id);
-        logger.LogInformation("Verified Price={Price} Stock={Stock} Active={Active}", updated.Price, updated.StockQuantity, updated.IsActive);
+
+        var updated = await db.Products
+            .AsNoTracking()
+            .FirstAsync(p => p.Id == product.Id);
+
+        logger.LogInformation(
+            "Verified Price={Price} Stock={Stock} Active={Active}",
+            updated.Price,
+            updated.StockQuantity,
+            updated.IsActive);
     }
 }

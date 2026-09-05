@@ -12,8 +12,8 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         await using var context = Fixture.CreateContext();
         var result = await context.Customers.BulkUpsertAsync(b => b
             .Add(u => u
-                .On(x => x.Code)
-                .Values(new[]
+                .MatchOn(x => x.Code)
+                .Insert(new[]
                 {
                     new Customer { Code = "UP-9501", Name = "Inserted", Active = true },
                     new Customer { Code = "UP-9502", Name = "InsertedToo", Active = false }
@@ -50,8 +50,8 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
                 .Add(u => u
-                    .On(x => x.Code)
-                    .Values(new Customer { Code = "UP-9510", Name = "Renamed", Active = false })));
+                    .MatchOn(x => x.Code)
+                    .Insert(new Customer { Code = "UP-9510", Name = "Renamed", Active = false })));
 
             Assert.Equal(1, result.TotalRowsAffected);
         }
@@ -78,8 +78,8 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
                 .Add(u => u
-                    .On(x => x.Code)
-                    .Values(new[]
+                    .MatchOn(x => x.Code)
+                    .Insert(new[]
                     {
                         new Customer { Code = existingCode, Name = "After", Active = false },
                         new Customer { Code = "UP-9521", Name = "BrandNew", Active = true }
@@ -112,8 +112,8 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         {
             var result = await context.Items.BulkUpsertAsync(b => b
                 .Add(u => u
-                    .On(x => new { x.Key1, x.Key2 })
-                    .Values(new[]
+                    .MatchOn(x => new { x.Key1, x.Key2 })
+                    .Insert(new[]
                     {
                         // (Key1="dup", Key2=1) exists: takes the update path.
                         new Item { Id = 9701, Key1 = "dup", Key2 = 1, Key3 = 42 },
@@ -148,13 +148,13 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
             var result = await context.Customers.BulkUpsertAsync(b =>
             {
                 b.Add(op => op
-                    .On(x => x.Code)
-                    .WhenMatched(x => !x.Active)
-                    .Values(new Customer { Code = guardedCode, Name = "Overwritten" }));
+                    .MatchOn(x => x.Code)
+                    .UpdateWhen(x => !x.Active)
+                    .Insert(new Customer { Code = guardedCode, Name = "Overwritten" }));
                 b.Add(op => op
-                    .On(x => x.Code)
-                    .WhenMatched(x => !x.Active)
-                    .Values(new Customer { Code = "UP-9531", Name = "FreshRow" }));
+                    .MatchOn(x => x.Code)
+                    .UpdateWhen(x => !x.Active)
+                    .Insert(new Customer { Code = "UP-9531", Name = "FreshRow" }));
             });
 
             Assert.Equal(1, result.TotalRowsAffected);
@@ -186,9 +186,9 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         {
             var result = await context.Customers.BulkUpsertAsync(b => b
                 .Add(u => u
-                    .On(x => x.Code)
-                    .Set(x => x.Active, false)
-                    .Values(new Customer { Code = code, Name = "IgnoredOnMatch" })));
+                    .MatchOn(x => x.Code)
+                    .Update(x => x.Active, false)
+                    .Insert(new Customer { Code = code, Name = "IgnoredOnMatch" })));
 
             Assert.Equal(1, result.TotalRowsAffected);
         }
@@ -216,8 +216,8 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
             {
                 b.Update<Item>(op => op.Where(x => x.Key1 == "legacy").Set(x => x.Key3, 77));
                 b.Upsert<Customer>(u => u
-                    .On(x => x.Code)
-                    .Values(new Customer { Code = "UP-9601", Name = "FromMixedBatch", Active = true }));
+                    .MatchOn(x => x.Code)
+                    .Insert(new Customer { Code = "UP-9601", Name = "FromMixedBatch", Active = true }));
                 b.Delete<Item>(op => op.Where(x => x.Id == 9600));
             });
 

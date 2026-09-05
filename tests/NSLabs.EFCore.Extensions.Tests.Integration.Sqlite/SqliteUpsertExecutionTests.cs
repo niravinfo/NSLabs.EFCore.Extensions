@@ -19,8 +19,8 @@ public class SqliteUpsertExecutionTests : SqliteTestBase
         await using var ctx2 = Fixture.CreateContext();
         var result = await ctx2.BulkExecuteAsync(b => b
             .Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .Values(new[]
+                .MatchOn(x => x.Code)
+                .Insert(new[]
                 {
                     new Customer { Code = "A", Name = "New", Active = false },
                     new Customer { Code = "B", Name = "Inserted", Active = true }
@@ -47,16 +47,72 @@ public class SqliteUpsertExecutionTests : SqliteTestBase
         }
 
         await using var ctx2 = Fixture.CreateContext();
-        await ctx2.BulkExecuteAsync(b => b
+        var result = await ctx2.BulkExecuteAsync(b => b
             .Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .WhenMatched(x => x.Active)
-                .Set(x => x.Name, "Changed")
-                .Values(new Customer { Code = "G", Name = "Changed", Active = true })));
+                .MatchOn(x => x.Code)
+                .UpdateWhen(x => x.Active)
+                .Update(x => x.Name, "Changed")
+                .Insert(new Customer { Code = "G", Name = "Changed", Active = true })));
+
+        // Guard false -> 0 rows affected, existing row untouched, no insert attempted.
+        Assert.Equal(0, result.TotalRowsAffected);
 
         await using var verify = Fixture.CreateContext();
-        var g = await verify.Customers.SingleAsync(x => x.Code == "G");
+        var g = await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == "G");
         Assert.Equal("Keep", g.Name);
+        Assert.False(g.Active);
+    }
+
+    [Fact]
+    public async Task Upsert_with_guard_true_applies_update()
+    {
+        await using (var ctx = Fixture.CreateContext())
+        {
+            await ctx.Customers.ExecuteDeleteAsync();
+            ctx.Customers.Add(new Customer { Code = "GT", Name = "Before", Active = true });
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var ctx2 = Fixture.CreateContext();
+        var result = await ctx2.BulkExecuteAsync(b => b
+            .Upsert<Customer>(u => u
+                .MatchOn(x => x.Code)
+                .UpdateWhen(x => x.Active)
+                .Update(x => x.Name, "Changed")
+                .Insert(new Customer { Code = "GT", Name = "Changed", Active = false })));
+
+        Assert.Equal(1, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+        var g = await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == "GT");
+        Assert.Equal("Changed", g.Name);
+        // Explicit Update wrote only Name; the Insert row's Active=false must NOT leak onto the match.
+        Assert.True(g.Active);
+    }
+
+    [Fact]
+    public async Task Explicit_update_constants_apply_on_match_only()
+    {
+        await using (var ctx = Fixture.CreateContext())
+        {
+            await ctx.Customers.ExecuteDeleteAsync();
+            ctx.Customers.Add(new Customer { Code = "E", Name = "Before", Active = true });
+            await ctx.SaveChangesAsync();
+        }
+
+        await using var ctx2 = Fixture.CreateContext();
+        var result = await ctx2.BulkExecuteAsync(b => b
+            .Upsert<Customer>(u => u
+                .MatchOn(x => x.Code)
+                .Update(x => x.Active, false)
+                .Insert(new Customer { Code = "E", Name = "IgnoredOnMatch", Active = false })));
+
+        Assert.Equal(1, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+        var reloaded = await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == "E");
+        Assert.False(reloaded.Active);
+        Assert.Equal("Before", reloaded.Name);
     }
 
     [Fact]
@@ -72,9 +128,9 @@ public class SqliteUpsertExecutionTests : SqliteTestBase
         await using var ctx2 = Fixture.CreateContext();
         await ctx2.BulkExecuteAsync(b => b
             .Upsert<Order>(u => u
-                .On(x => x.OrderNo)
-                .Set(x => x.Amount, x => x.Amount * 2m)
-                .Values(new Order { OrderNo = "O-100", Amount = 999m, Status = OrderStatus.Shipped })));
+                .MatchOn(x => x.OrderNo)
+                .Update(x => x.Amount, x => x.Amount * 2m)
+                .Insert(new Order { OrderNo = "O-100", Amount = 999m, Status = OrderStatus.Shipped })));
 
         await using var verify = Fixture.CreateContext();
         var o = await verify.Orders.SingleAsync(x => x.OrderNo == "O-100");
@@ -86,7 +142,7 @@ public class SqliteUpsertExecutionTests : SqliteTestBase
     {
         await using var ctx = Fixture.CreateContext();
         var result = await ctx.BulkExecuteAsync(b => b
-            .Upsert<Customer>(u => u.On(x => x.Code).Values(Array.Empty<Customer>())));
+            .Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(Array.Empty<Customer>())));
         Assert.Equal(0, result.TotalRowsAffected);
     }
 
@@ -95,7 +151,7 @@ public class SqliteUpsertExecutionTests : SqliteTestBase
     {
         await using var ctx = Fixture.CreateContext();
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => ctx.BulkExecuteAsync(b => b
-            .Upsert<Customer>(u => u.On(x => x.Code).Values(new[]
+            .Upsert<Customer>(u => u.MatchOn(x => x.Code).Insert(new[]
             {
                 new Customer { Code = "DUP" },
                 new Customer { Code = "DUP" }

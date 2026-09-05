@@ -89,7 +89,7 @@ public class SqliteComputedSetGoldenSqlTests
     [Fact]
     public void Upsert_computed_uses_bare_column_not_alias()
     {
-        var (sql, _) = SqliteHarness.GenerateSingle(b => b.Upsert<Customer>(u => u.On(x => x.Code).Set(x => x.Name, x => x.Name + "_upd").Values(new Customer { Code = "A", Name = "X" })));
+        var (sql, _) = SqliteHarness.GenerateSingle(b => b.Upsert<Customer>(u => u.MatchOn(x => x.Code).Update(x => x.Name, x => x.Name + "_upd").Insert(new Customer { Code = "A", Name = "X" })));
         Assert.Contains("\"Name\" = (\"Name\" || @p", sql);
         Assert.DoesNotContain("[t].", sql);
     }

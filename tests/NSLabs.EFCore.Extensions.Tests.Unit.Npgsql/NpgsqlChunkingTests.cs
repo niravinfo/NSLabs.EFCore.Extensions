@@ -32,8 +32,8 @@ public class NpgsqlChunkingTests
     public void Upsert_rows_split_respecting_budget()
     {
         var chunks = NpgsqlHarness.Generate(b => b.Upsert<Customer>(u => u
-            .On(x => x.Code)
-            .Values(new[]
+            .MatchOn(x => x.Code)
+            .Insert(new[]
             {
                 new Customer { Code = "A" },
                 new Customer { Code = "B" },

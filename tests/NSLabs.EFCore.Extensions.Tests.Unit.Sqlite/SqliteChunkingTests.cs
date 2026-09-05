@@ -33,8 +33,8 @@ public class SqliteChunkingTests
     public void Upsert_rows_split_respecting_999()
     {
         var chunks = SqliteHarness.Generate(b => b.Upsert<Customer>(u => u
-            .On(x => x.Code)
-            .Values(new[]
+            .MatchOn(x => x.Code)
+            .Insert(new[]
             {
                 new Customer { Code = "A" },
                 new Customer { Code = "B" },

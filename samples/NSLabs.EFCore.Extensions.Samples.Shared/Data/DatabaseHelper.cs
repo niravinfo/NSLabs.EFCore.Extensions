@@ -21,6 +21,8 @@ public static class DatabaseHelper
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [InventoryLogs]", cancellationToken);
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [Customers]", cancellationToken);
             await db.Database.ExecuteSqlRawAsync("DELETE FROM [Products]", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM [DailyArticleViews]", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM [EnergyReadings]", cancellationToken);
 
             // Identity reseed (SQL Server only; skipped on SQLite/other providers to avoid log noise)
             if (db.Database.ProviderName == "Microsoft.EntityFrameworkCore.SqlServer")

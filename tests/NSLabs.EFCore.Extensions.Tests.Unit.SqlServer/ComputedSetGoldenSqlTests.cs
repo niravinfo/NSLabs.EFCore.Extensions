@@ -237,9 +237,9 @@ public class ComputedSetGoldenSqlTests
     {
         var (sql, parameters) = Harness.GenerateSingle(b => b
             .Upsert<Order>(u => u
-                .On(x => x.OrderNo)
-                .Set(x => x.Amount, x => x.Amount * 1.1m)
-                .Values(new Order { OrderNo = "O-1", Amount = 100m, Status = OrderStatus.Pending })));
+                .MatchOn(x => x.OrderNo)
+                .Update(x => x.Amount, x => x.Amount * 1.1m)
+                .Insert(new Order { OrderNo = "O-1", Amount = 100m, Status = OrderStatus.Pending })));
 
         // Matched update should use [t].[Amount]
         Assert.Contains("WHEN MATCHED THEN UPDATE SET [Amount] = ([t].[Amount] * @p", sql);
@@ -256,10 +256,10 @@ public class ComputedSetGoldenSqlTests
     {
         var (sql, _) = Harness.GenerateSingle(b => b
             .Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .WhenMatched(x => x.Active)
-                .Set(x => x.Name, x => x.Name)
-                .Values(new Customer { Code = "A", Name = "X", Active = true })));
+                .MatchOn(x => x.Code)
+                .UpdateWhen(x => x.Active)
+                .Update(x => x.Name, x => x.Name)
+                .Insert(new Customer { Code = "A", Name = "X", Active = true })));
 
         // Guard AND computed assignment with target alias
         Assert.Contains("WHEN MATCHED AND [t].[Active] = 1 THEN UPDATE SET [Name] = [t].[Name]", sql);
@@ -270,9 +270,9 @@ public class ComputedSetGoldenSqlTests
     {
         var chunks = Harness.Generate(
             b => b.Upsert<Customer>(u => u
-                .On(x => x.Code)
-                .Set(x => x.Name, x => x.Name + "_suffix")
-                .Values(new[]
+                .MatchOn(x => x.Code)
+                .Update(x => x.Name, x => x.Name + "_suffix")
+                .Insert(new[]
                 {
                     new Customer { Code = "A", Name = "X", Active = true },
                     new Customer { Code = "B", Name = "Y", Active = false }
@@ -291,9 +291,9 @@ public class ComputedSetGoldenSqlTests
         decimal factor = 0.5m;
         var (sql, parameters) = Harness.GenerateSingle(b => b
             .Upsert<Order>(u => u
-                .On(x => x.OrderNo)
-                .Set(x => x.Amount, x => x.Amount * factor)
-                .Values(new Order { OrderNo = "O-1", Amount = 10m, Status = OrderStatus.Pending })));
+                .MatchOn(x => x.OrderNo)
+                .Update(x => x.Amount, x => x.Amount * factor)
+                .Insert(new Order { OrderNo = "O-1", Amount = 10m, Status = OrderStatus.Pending })));
 
         Assert.Contains("[t].[Amount] * @p", sql);
         Assert.DoesNotContain("[s].[Amount] * @p", sql);
@@ -405,7 +405,7 @@ public class ComputedSetGoldenSqlTests
         Assert.Contains("CASE WHEN [ParentId] IS NULL THEN [Key2] ELSE ([Key2] * @p", sql);
 
         var (sql2, _) = Harness.GenerateSingle(b => b
-            .Upsert<Item>(u => u.On(x => x.Id).Set(x => x.Key2, x => x.ParentId ?? 5).Values(new Item { Id = 1, Key2 = 10 })));
+            .Upsert<Item>(u => u.MatchOn(x => x.Id).Update(x => x.Key2, x => x.ParentId ?? 5).Insert(new Item { Id = 1, Key2 = 10 })));
         Assert.Contains("COALESCE([t].[ParentId]", sql2);
     }
 
@@ -457,7 +457,7 @@ public class ComputedSetGoldenSqlTests
     [Fact]
     public void Upsert_string_concat_targets_t_alias()
     {
-        var (sql, _) = Harness.GenerateSingle(b => b.Upsert<Customer>(u => u.On(x => x.Code).Set(x => x.Name, x => x.Name + "_upd").Values(new Customer { Code = "A", Name = "X" })));
+        var (sql, _) = Harness.GenerateSingle(b => b.Upsert<Customer>(u => u.MatchOn(x => x.Code).Update(x => x.Name, x => x.Name + "_upd").Insert(new Customer { Code = "A", Name = "X" })));
         Assert.Contains("[t].[Name] + @p", sql);
         Assert.DoesNotContain("[s].[Name] + @p", sql);
     }
