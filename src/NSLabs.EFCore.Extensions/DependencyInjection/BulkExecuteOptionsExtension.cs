@@ -56,9 +56,7 @@ public sealed class BulkExecuteOptionsExtension : IDbContextOptionsExtension
             get
             {
                 var options = ((BulkExecuteOptionsExtension)Extension).SnapshotRef;
-                return $"BulkExecute MaxParametersPerCommand={options.MaxParametersPerCommand} " +
-                       $"ThrowIfZeroAffected={options.ThrowIfZeroAffected} " +
-                       $"CommandTimeout={options.CommandTimeout?.ToString() ?? "null"} ";
+                return $"BulkExecute MaxParametersPerCommand={options.MaxParametersPerCommand} ThrowIfZeroAffected={options.ThrowIfZeroAffected} CommandTimeout={options.CommandTimeout?.ToString() ?? "null"} ";
             }
         }
 
