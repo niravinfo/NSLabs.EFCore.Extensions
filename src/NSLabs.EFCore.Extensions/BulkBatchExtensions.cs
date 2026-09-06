@@ -26,6 +26,11 @@ public static class BulkBatchExtensions
         return batch.ExecuteAsync(cancellationToken);
     }
 
+    /// <remarks>
+    /// <paramref name="options"/> fully replaces any <c>UseBulkExecute</c> configuration for
+    /// this call and is used directly without a defensive copy: do not mutate it while the
+    /// returned task is in flight. Sharing a read-only instance across calls and threads is safe.
+    /// </remarks>
     public static async Task<BulkExecuteResult> BulkExecuteAsync(
         this DbContext context,
         Action<IBulkBatch> build,
@@ -50,6 +55,11 @@ public static class BulkBatchExtensions
         return batch.ExecuteAsync(cancellationToken);
     }
 
+    /// <remarks>
+    /// <paramref name="options"/> fully replaces any <c>UseBulkExecute</c> configuration for
+    /// this call and is used directly without a defensive copy: do not mutate it while the
+    /// returned task is in flight. Sharing a read-only instance across calls and threads is safe.
+    /// </remarks>
     public static Task<BulkExecuteResult> BulkUpdateAsync<TEntity>(
         this DbSet<TEntity> set,
         Action<TableUpdateBuilder<TEntity>> configure,
@@ -71,6 +81,11 @@ public static class BulkBatchExtensions
         return batch.ExecuteAsync(cancellationToken);
     }
 
+    /// <remarks>
+    /// <paramref name="options"/> fully replaces any <c>UseBulkExecute</c> configuration for
+    /// this call and is used directly without a defensive copy: do not mutate it while the
+    /// returned task is in flight. Sharing a read-only instance across calls and threads is safe.
+    /// </remarks>
     public static Task<BulkExecuteResult> BulkUpsertAsync<TEntity>(
         this DbSet<TEntity> set,
         Action<TableUpsertBuilder<TEntity>> configure,

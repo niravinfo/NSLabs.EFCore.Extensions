@@ -61,18 +61,25 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
     public Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        return ExecuteCoreAsync(options.CloneAndValidate(), cancellationToken);
+
+        // No defensive copy: the caller's instance is used directly (validated, then read).
+        // Contract: do not mutate it while the returned task is in flight; sharing a
+        // read-only instance across calls and threads is safe.
+        options.Validate();
+        return ExecuteCoreAsync(options, cancellationToken);
     }
 
     internal static BulkExecuteOptions ResolveEffective(DbContext context, BulkExecuteOptions? explicitOptions)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Explicit object = full replacement (back-compat). Cloned on entry so a caller
-        // mutating their instance mid-await cannot change in-flight behavior.
+        // Explicit object = full replacement (back-compat). Validated on entry, then used
+        // directly with no defensive copy (see contract on ExecuteAsync): the common
+        // high-throughput pattern — one shared read-only instance — stays allocation-free.
         if (explicitOptions is not null)
         {
-            return explicitOptions.CloneAndValidate();
+            explicitOptions.Validate();
+            return explicitOptions;
         }
 
         // Default path: per-DbContext snapshot by direct read-only reference (no clone,

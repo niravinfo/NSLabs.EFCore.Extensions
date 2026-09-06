@@ -16,5 +16,13 @@ public interface IBulkBatch
 
     Task<BulkExecuteResult> ExecuteAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Executes the batch with an explicit <see cref="BulkExecuteOptions"/> object, fully
+    /// replacing any <c>UseBulkExecute</c> configuration for this call.
+    /// </summary>
+    /// <remarks>
+    /// The instance is used directly without a defensive copy: do not mutate it while the
+    /// returned task is in flight. Sharing a read-only instance across calls and threads is safe.
+    /// </remarks>
     Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default);
 }

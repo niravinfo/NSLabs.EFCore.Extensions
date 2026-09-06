@@ -141,15 +141,27 @@ public class BulkExecuteOptionsResolutionTests
     }
 
     [Fact]
-    public void ResolveEffective_clones_explicit_object_on_entry()
+    public void ResolveEffective_uses_explicit_object_directly_without_copy()
     {
         using var context = CreateContext();
         var explicitOptions = new BulkExecuteOptions { CommandTimeout = 60 };
 
         var resolved = BulkBatch.ResolveEffective(context, explicitOptions);
-        explicitOptions.CommandTimeout = 1;
 
-        Assert.Equal(60, resolved.CommandTimeout);
+        // No defensive copy (hot-path allocation-free); the no-mutate-while-in-flight
+        // contract on the overloads covers lifetime instead.
+        Assert.Same(explicitOptions, resolved);
+    }
+
+    [Fact]
+    public void ResolveEffective_validates_explicit_object_on_entry()
+    {
+        using var context = CreateContext();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            BulkBatch.ResolveEffective(context, new BulkExecuteOptions { MaxParametersPerCommand = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            BulkBatch.ResolveEffective(context, new BulkExecuteOptions { CommandTimeout = -1 }));
     }
 
     [Fact]

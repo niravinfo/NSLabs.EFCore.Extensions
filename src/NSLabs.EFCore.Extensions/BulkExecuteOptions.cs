@@ -42,11 +42,4 @@ public sealed class BulkExecuteOptions
                 $"'{nameof(CommandTimeout)}' must be greater than or equal to zero when set.");
         }
     }
-
-    internal BulkExecuteOptions CloneAndValidate()
-    {
-        var clone = Clone();
-        clone.Validate();
-        return clone;
-    }
 }
