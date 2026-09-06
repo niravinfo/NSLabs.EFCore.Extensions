@@ -50,8 +50,7 @@ public class ExecutorCoreTests
         var (connection, chunks, counts) = Arrange();
         ScriptRowCounts(connection, [1], [7]);
 
-        var logged = new List<string>();
-        var options = new BulkExecuteOptions { OnCommandText = logged.Add };
+        var options = new BulkExecuteOptions();
         var transaction = new FakeAdo.Transaction(connection, IsolationLevel.ReadCommitted);
 
         await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction, chunks, counts, options, CancellationToken.None);
@@ -59,7 +58,6 @@ public class ExecutorCoreTests
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.Equal(chunks[0].CommandText, connection.ExecutedCommands[0].CommandText);
         Assert.Equal(chunks[1].CommandText, connection.ExecutedCommands[1].CommandText);
-        Assert.True(logged.Count == chunks.Count);
 
         var firstParams = (FakeAdo.ParameterCollection)connection.ExecutedCommands[0].Parameters;
         Assert.Equal(2, firstParams.Count);

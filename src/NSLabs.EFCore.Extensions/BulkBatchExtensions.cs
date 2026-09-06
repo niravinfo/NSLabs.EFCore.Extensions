@@ -17,7 +17,14 @@ public static class BulkBatchExtensions
         this DbContext context,
         Action<IBulkBatch> build,
         CancellationToken cancellationToken = default)
-        => context.BulkExecuteAsync(build, new BulkExecuteOptions(), cancellationToken);
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(build);
+
+        var batch = new BulkBatch(context);
+        build(batch);
+        return batch.ExecuteAsync(cancellationToken);
+    }
 
     public static async Task<BulkExecuteResult> BulkExecuteAsync(
         this DbContext context,
@@ -37,7 +44,11 @@ public static class BulkBatchExtensions
         this DbSet<TEntity> set,
         Action<TableUpdateBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
-        => set.BulkUpdateAsync(configure, new BulkExecuteOptions(), cancellationToken);
+    {
+        var batch = new BulkBatch(GetContext(set));
+        configure(new TableUpdateBuilder<TEntity>(batch));
+        return batch.ExecuteAsync(cancellationToken);
+    }
 
     public static Task<BulkExecuteResult> BulkUpdateAsync<TEntity>(
         this DbSet<TEntity> set,
@@ -54,7 +65,11 @@ public static class BulkBatchExtensions
         this DbSet<TEntity> set,
         Action<TableUpsertBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
-        => set.BulkUpsertAsync(configure, new BulkExecuteOptions(), cancellationToken);
+    {
+        var batch = new BulkBatch(GetContext(set));
+        configure(new TableUpsertBuilder<TEntity>(batch));
+        return batch.ExecuteAsync(cancellationToken);
+    }
 
     public static Task<BulkExecuteResult> BulkUpsertAsync<TEntity>(
         this DbSet<TEntity> set,

@@ -1,6 +1,8 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using NSLabs.EFCore.Extensions.DependencyInjection;
 using NSLabs.EFCore.Extensions.Internal;
 
 namespace NSLabs.EFCore.Extensions;
@@ -54,11 +56,42 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
     }
 
     public Task<BulkExecuteResult> ExecuteAsync(CancellationToken cancellationToken = default)
-        => ExecuteAsync(new BulkExecuteOptions(), cancellationToken);
+        => ExecuteCoreAsync(ResolveEffective(_context, explicitOptions: null), cancellationToken);
 
-    public async Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
+    public Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+        return ExecuteCoreAsync(options.CloneAndValidate(), cancellationToken);
+    }
+
+    internal static BulkExecuteOptions ResolveEffective(DbContext context, BulkExecuteOptions? explicitOptions)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Explicit object = full replacement (back-compat). Cloned on entry so a caller
+        // mutating their instance mid-await cannot change in-flight behavior.
+        if (explicitOptions is not null)
+        {
+            return explicitOptions.CloneAndValidate();
+        }
+
+        // Default path: per-DbContext snapshot by direct read-only reference (no clone —
+        // execution never mutates it), else factory defaults. Resolved here, at execution
+        // time, never at batch-construction time.
+        var snapshotRef = context.GetService<IDbContextOptions>()
+            ?.FindExtension<BulkExecuteOptionsExtension>()
+            ?.SnapshotRef;
+        if (snapshotRef is not null)
+        {
+            snapshotRef.Validate();
+            return snapshotRef;
+        }
+
+        return new BulkExecuteOptions();
+    }
+
+    private async Task<BulkExecuteResult> ExecuteCoreAsync(BulkExecuteOptions options, CancellationToken cancellationToken)
+    {
 
         if (_operations.Count == 0)
         {

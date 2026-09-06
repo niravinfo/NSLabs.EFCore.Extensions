@@ -50,7 +50,6 @@ public class TransactionTests
         Assert.Equal(2000, options.MaxParametersPerCommand);
         Assert.False(options.ThrowIfZeroAffected);
         Assert.Null(options.CommandTimeout);
-        Assert.Null(options.OnCommandText);
     }
 
     [Fact]
@@ -167,32 +166,28 @@ public class TransactionTests
     }
 
     [Fact]
-    public async Task OnCommandText_hook_is_invoked_for_every_chunk_without_transaction()
+    public async Task Each_chunk_command_is_executed_without_transaction()
     {
         var (connection, chunks, counts) = ArrangeTwoOps();
         ScriptRowCounts(connection, [1], [1]);
-        var logged = new List<string>();
-        var options = new BulkExecuteOptions { OnCommandText = logged.Add };
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, options, CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
 
-        Assert.Equal(2, logged.Count);
-        Assert.Equal(chunks[0].CommandText, logged[0]);
-        Assert.Equal(chunks[1].CommandText, logged[1]);
+        Assert.Equal(2, connection.ExecutedCommands.Count);
+        Assert.Equal(chunks[0].CommandText, connection.ExecutedCommands[0].CommandText);
+        Assert.Equal(chunks[1].CommandText, connection.ExecutedCommands[1].CommandText);
     }
 
     [Fact]
-    public async Task OnCommandText_hook_is_invoked_when_piggybacking_on_user_transaction()
+    public async Task Each_chunk_command_is_executed_when_piggybacking_on_user_transaction()
     {
         var (connection, chunks, counts) = ArrangeTwoOps();
         ScriptRowCounts(connection, [1], [1]);
-        var logged = new List<string>();
-        var options = new BulkExecuteOptions { OnCommandText = logged.Add };
         var tx = new FakeAdo.Transaction(connection, IsolationLevel.ReadCommitted);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, options, CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
 
-        Assert.Equal(2, logged.Count);
+        Assert.Equal(2, connection.ExecutedCommands.Count);
     }
 
     [Fact]

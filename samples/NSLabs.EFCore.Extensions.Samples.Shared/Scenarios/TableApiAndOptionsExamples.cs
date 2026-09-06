@@ -166,7 +166,7 @@ public static class TableApiAndOptionsExamples
 
     private static async Task Example4_OptionsChunkingAndLoggingAsync(SampleDbContext db, ILogger logger)
     {
-        logger.LogInformation("Example 4: Options MaxParametersPerCommand + OnCommandText + CommandTimeout");
+        logger.LogInformation("Example 4: Options MaxParametersPerCommand + CommandTimeout");
 
         var suffix = Guid.NewGuid().ToString("N")[..6];
         for (var i = 0; i < 5; i++)
@@ -187,7 +187,6 @@ public static class TableApiAndOptionsExamples
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
-        var logs = new List<string>();
         var result = await db.BulkExecuteAsync(b =>
         {
             for (var i = 0; i < 5; i++)
@@ -197,16 +196,12 @@ public static class TableApiAndOptionsExamples
             }
         }, new BulkExecuteOptions
         {
+            // Small param budget forces the batch to split into multiple commands.
             MaxParametersPerCommand = 4,
-            CommandTimeout = 30,
-            OnCommandText = sql =>
-            {
-                logs.Add(sql);
-                logger.LogDebug("Generated SQL chunk length {Len}", sql.Length);
-            }
+            CommandTimeout = 30
         });
 
-        logger.LogInformation("Chunked batch chunks={Chunks} rows={Rows}", logs.Count, result.TotalRowsAffected);
+        logger.LogInformation("Chunked batch ops={Ops} rows={Rows}", result.Operations.Count, result.TotalRowsAffected);
 
         foreach (var op in result.Operations)
         {

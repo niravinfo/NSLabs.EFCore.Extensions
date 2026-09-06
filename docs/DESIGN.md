@@ -206,7 +206,7 @@ nothing — callers can confirm changes before replying to their users. Pairs wi
   - Transaction — caller-managed via `Database.BeginTransactionAsync()` for all-or-nothing (no implicit transaction — see `README.md#transactions`)
 - `throwIfZeroAffected` per-op verification (rollback only when inside an ambient transaction)
 - Command timeout
-- SQL logging hook
+- Per-`DbContext` defaults via `UseBulkExecute(...)` (`IDbContextOptionsExtension`); explicit per-call `BulkExecuteOptions` object fully replaces them. Unconfigured → factory defaults (`MaxParametersPerCommand=2000`, `ThrowIfZeroAffected=false`, `CommandTimeout=null`).
 
 ---
 
