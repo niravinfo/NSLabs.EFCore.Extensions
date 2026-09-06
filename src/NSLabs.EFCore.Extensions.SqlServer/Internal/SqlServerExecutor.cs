@@ -2,6 +2,7 @@ using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using NSLabs.EFCore.Extensions;
+using NSLabs.EFCore.Extensions.Diagnostics;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -25,8 +26,18 @@ internal static class SqlServerExecutor
 
         if (strategy.RetriesOnFailure)
         {
+            var attempt = 0;
             return strategy.ExecuteAsync(
-                () => RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken));
+                () =>
+                {
+                    if (attempt > 0)
+                    {
+                        BulkExecuteTelemetry.RecordRetryAttempt(attempt);
+                    }
+
+                    attempt++;
+                    return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+                });
         }
 
         return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
@@ -47,6 +58,31 @@ internal static class SqlServerExecutor
         var transaction = database.CurrentTransaction?.GetDbTransaction();
         var shouldCloseConnection = false;
 
+        // Chunk telemetry context — resolved only when observed (active
+        // ActivityListener). Null means defaults; StartChunkScope re-checks.
+        BulkInstrumentationOptions? instrumentation = null;
+        string? dbSystem = null;
+        string? dbName = null;
+        if (BulkExecuteTelemetry.Source.HasListeners())
+        {
+            try
+            {
+                instrumentation = BulkBatch.ResolveInstrumentationEffective(context);
+                dbSystem = BulkExecuteTelemetry.DbSystem(context.Database.ProviderName);
+                dbName = connection.Database;
+                if (string.IsNullOrEmpty(dbName))
+                {
+                    dbName = null;
+                }
+            }
+            catch
+            {
+                instrumentation = null;
+                dbSystem = null;
+                dbName = null;
+            }
+        }
+
         try
         {
             if (closeConnection && connection.State == ConnectionState.Closed)
@@ -55,7 +91,7 @@ internal static class SqlServerExecutor
                 shouldCloseConnection = true;
             }
 
-            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
+            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken, instrumentation, dbSystem, dbName).ConfigureAwait(false);
 
             // When ThrowIfZeroAffected is true and an ambient transaction is present the caller
             // can roll back atomically. Without an ambient transaction each statement has already
@@ -90,11 +126,14 @@ internal static class SqlServerExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BulkInstrumentationOptions? instrumentation = null,
+        string? dbSystem = null,
+        string? dbName = null)
     {
-        foreach (var chunk in chunks)
+        for (var i = 0; i < chunks.Count; i++)
         {
-            await ExecuteChunkAsync(connection, chunk, transaction, counts, options, cancellationToken).ConfigureAwait(false);
+            await ExecuteChunkAsync(connection, chunks[i], transaction, counts, options, cancellationToken, i, instrumentation, dbSystem, dbName).ConfigureAwait(false);
         }
     }
 
@@ -104,48 +143,65 @@ internal static class SqlServerExecutor
         System.Data.Common.DbTransaction? transaction,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int chunkIndex = 0,
+        BulkInstrumentationOptions? instrumentation = null,
+        string? dbSystem = null,
+        string? dbName = null)
     {
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = chunk.CommandText;
-
-        if (options.CommandTimeout is { } timeout)
+        using var scope = BulkExecuteTelemetry.StartChunkScope(chunk, chunkIndex, instrumentation, dbSystem, dbName);
+        try
         {
-            command.CommandTimeout = timeout;
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = chunk.CommandText;
+
+            if (options.CommandTimeout is { } timeout)
+            {
+                command.CommandTimeout = timeout;
+            }
+
+            foreach (var param in chunk.Parameters)
+            {
+                var dbParam = command.CreateParameter();
+                dbParam.ParameterName = param.Name;
+                dbParam.Value = param.Value ?? DBNull.Value;
+                command.Parameters.Add(dbParam);
+            }
+
+            using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+
+            while (reader.FieldCount == 0 && await reader.NextResultAsync(cancellationToken).ConfigureAwait(false))
+            {
+            }
+
+            if (reader.FieldCount == 0)
+            {
+                throw new InvalidOperationException("Bulk execution did not return the expected rowcount result set.");
+            }
+
+            if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidOperationException("Bulk execution rowcount result set was empty.");
+            }
+
+            var chunkRows = 0;
+            for (var k = 0; k < chunk.OperationIndices.Count; k++)
+            {
+                var index = chunk.OperationIndices[k];
+                var affected = reader.GetInt32(k);
+
+                // An operation split across chunks accumulates its rowcount.
+                counts[index] = counts.TryGetValue(index, out var existing) ? existing + affected : affected;
+                chunkRows += affected;
+            }
+
+            scope?.SetRows(chunkRows);
         }
-
-        foreach (var param in chunk.Parameters)
+        catch (Exception ex)
         {
-            var dbParam = command.CreateParameter();
-            dbParam.ParameterName = param.Name;
-            dbParam.Value = param.Value ?? DBNull.Value;
-            command.Parameters.Add(dbParam);
-        }
-
-        using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-        while (reader.FieldCount == 0 && await reader.NextResultAsync(cancellationToken).ConfigureAwait(false))
-        {
-        }
-
-        if (reader.FieldCount == 0)
-        {
-            throw new InvalidOperationException("Bulk execution did not return the expected rowcount result set.");
-        }
-
-        if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            throw new InvalidOperationException("Bulk execution rowcount result set was empty.");
-        }
-
-        for (var k = 0; k < chunk.OperationIndices.Count; k++)
-        {
-            var index = chunk.OperationIndices[k];
-            var affected = reader.GetInt32(k);
-
-            // An operation split across chunks accumulates its rowcount.
-            counts[index] = counts.TryGetValue(index, out var existing) ? existing + affected : affected;
+            scope?.SetError(ex);
+            throw;
         }
     }
 }

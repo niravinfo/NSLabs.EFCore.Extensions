@@ -2,7 +2,9 @@ using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.Extensions.Logging;
 using NSLabs.EFCore.Extensions.DependencyInjection;
+using NSLabs.EFCore.Extensions.Diagnostics;
 using NSLabs.EFCore.Extensions.Internal;
 
 namespace NSLabs.EFCore.Extensions;
@@ -92,6 +94,20 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             ?? new BulkExecuteOptions();
     }
 
+    internal static BulkInstrumentationOptions ResolveInstrumentationEffective(DbContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Independent axis from execution options: an explicit per-call
+        // BulkExecuteOptions never resets instrumentation policy. Same snapshot
+        // semantics as ResolveEffective — direct read-only reference when configured,
+        // else factory defaults (valid by construction).
+        return context.GetService<IDbContextOptions>()
+            ?.FindExtension<BulkInstrumentationOptionsExtension>()
+            ?.SnapshotRef
+            ?? new BulkInstrumentationOptions();
+    }
+
     private async Task<BulkExecuteResult> ExecuteCoreAsync(BulkExecuteOptions options, CancellationToken cancellationToken)
     {
 
@@ -111,24 +127,98 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         }
 
         var chunks = provider.Generate(_operations, options.MaxParametersPerCommand);
-        var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
 
-        // EF Core pattern: manual loop vs LINQ Select+Sum
-        var operationResults = new OperationResult[_operations.Count];
-        var total = 0;
-        for (var i = 0; i < _operations.Count; i++)
+        // Telemetry prelude — zero-cost when nobody listens. Policy is resolved only
+        // when observed (active ActivityListener or debug-level logging); the whole
+        // block is defensive so telemetry can never fail the batch.
+        ILogger? logger = null;
+        BulkInstrumentationOptions? instrumentation = null;
+        var tracing = false;
+        try
         {
-            var op = _operations[i];
-            var affected = counts.GetValueOrDefault(op.GlobalIndex);
-            total += affected;
-            operationResults[i] = new OperationResult(op.EntityType.DisplayName(), affected);
+            try
+            {
+                logger = _context.GetService<ILoggerFactory>()?.CreateLogger(typeof(BulkBatch));
+            }
+            catch
+            {
+                logger = null;
+            }
+
+            tracing = BulkExecuteTelemetry.Source.HasListeners();
+            if (tracing || logger?.IsEnabled(LogLevel.Debug) == true)
+            {
+                instrumentation = ResolveInstrumentationEffective(_context);
+            }
+        }
+        catch
+        {
+            logger = null;
+            instrumentation = null;
+            tracing = false;
         }
 
-        return new BulkExecuteResult
+        if (logger?.IsEnabled(LogLevel.Debug) == true)
         {
-            TotalRowsAffected = total,
-            Operations = operationResults
-        };
+            logger.LogDebug(
+                new EventId(1001, "BulkExecuteStart"),
+                "BulkExecute start: {OperationCount} operation(s) in {ChunkCount} chunk(s) on {Provider}.",
+                _operations.Count,
+                chunks.Count,
+                providerName);
+        }
+
+        using var batchScope = BulkExecuteTelemetry.StartBatchScope(
+            _context, providerName, _operations, options, instrumentation, chunks);
+
+        try
+        {
+            var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
+
+            // EF Core pattern: manual loop vs LINQ Select+Sum
+            var operationResults = new OperationResult[_operations.Count];
+            var total = 0;
+            for (var i = 0; i < _operations.Count; i++)
+            {
+                var op = _operations[i];
+                var affected = counts.GetValueOrDefault(op.GlobalIndex);
+                total += affected;
+                operationResults[i] = new OperationResult(op.EntityType.DisplayName(), affected);
+            }
+
+            batchScope?.SetTotalRows(total);
+
+            if (logger?.IsEnabled(LogLevel.Debug) == true)
+            {
+                logger.LogDebug(
+                    new EventId(1002, "BulkExecuteCompleted"),
+                    "BulkExecute completed: {TotalRows} row(s) across {OperationCount} operation(s).",
+                    total,
+                    _operations.Count);
+            }
+
+            return new BulkExecuteResult
+            {
+                TotalRowsAffected = total,
+                Operations = operationResults
+            };
+        }
+        catch (Exception ex)
+        {
+            batchScope?.SetError(ex);
+
+            if (logger?.IsEnabled(LogLevel.Error) == true)
+            {
+                logger.LogError(
+                    new EventId(1101, "BulkExecuteFailed"),
+                    ex,
+                    "BulkExecute failed after {OperationCount} operation(s) on {Provider}.",
+                    _operations.Count,
+                    providerName);
+            }
+
+            throw;
+        }
     }
 
     internal static void ValidateUniqueUpsertKeys(IReadOnlyList<BoundOperation> operations)

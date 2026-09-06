@@ -97,6 +97,33 @@ var r = await batch.ExecuteAsync(ct);
 
 - **[Design & Architecture](docs/DESIGN.md)** — Semantics, translation pipeline, and provider strategies
 
+## Observability (OpenTelemetry)
+
+Bulk execution emits traces with **zero required dependencies** (inbox `ActivitySource`; no `OpenTelemetry.*` reference in any library package):
+
+- One `BulkExecute` client span per non-empty batch, with one `BulkExecute.Chunk` child span per executed chunk (DB round-trip). Spans nest under your ambient `Activity.Current`.
+- PII-safe by default: counts, provider/operation names, row counts. SQL text is never attached unless you opt in; parameter values never.
+- Opt-in policy (independent of `BulkExecuteOptions`, configured per `DbContext`):
+
+```csharp
+options.UseBulkInstrumentation(o =>
+{
+    o.EnableChunkSpans = true;      // per-chunk child spans (default true)
+    o.RecordException = true;       // "exception" span events (default true)
+    o.CaptureCommandText = false;   // db.statement (default false, truncated)
+    o.MaxCommandLength = 4000;      // db.statement truncation guard
+});
+```
+
+Collect with the stock SDK (sampling stays with the SDK sampler):
+
+```csharp
+builder.Services.AddOpenTelemetry().WithTracing(t => t
+    .AddSource(BulkExecuteTelemetryNames.SourceName)); // "NSLabs.EFCore.Extensions"
+```
+
+No listener = no spans, no overhead. Try it: `NSLABS_OTEL_CONSOLE=true dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite`.
+
 ## Sample Applications
 
 Provider-consistent layout (`Shared` + per-provider host):

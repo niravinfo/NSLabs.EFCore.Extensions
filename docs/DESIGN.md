@@ -233,6 +233,15 @@ Fluent model → Metadata binding → Grouping/Chunking → Provider strategy �
 Execution goes over the context's connection + current transaction (`Database.CurrentTransaction`),
 so logging, interceptors, and retry strategies keep working.
 
+> Observability note: because execution bypasses EF command interceptors
+> (`GetDbConnection()` + raw `DbCommand`), EF's own command diagnostics do not
+> fire for these round-trips. The library therefore emits its own spans instead:
+> one `BulkExecute` client span per batch (opened in `BulkBatch.ExecuteCoreAsync`)
+> with one `BulkExecute.Chunk` child span per executed chunk (all three provider
+> executors share one helper — no triplicated logic). Policy lives in
+> `BulkInstrumentationOptions` (`UseBulkInstrumentation`), deliberately separate
+> from `BulkExecuteOptions`. Full schema: `docs/OTEL_PLAN.md` §4.
+
 ---
 
 ## 4. Execution Strategies Per Provider

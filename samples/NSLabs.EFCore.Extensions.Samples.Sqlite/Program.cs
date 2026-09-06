@@ -3,8 +3,11 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using NSLabs.EFCore.Extensions;
 using NSLabs.EFCore.Extensions.Samples.Data;
 using NSLabs.EFCore.Extensions.Samples.Scenarios;
+using OpenTelemetry;
+using OpenTelemetry.Trace;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -30,9 +33,26 @@ builder.Services.AddDbContext<SampleDbContext>(options =>
     options.UseSqlite(connectionString);
 });
 
+// Observability demo (opt-in): NSLABS_OTEL_CONSOLE=true exports bulk-execution
+// spans (BulkExecute + BulkExecute.Chunk) to the console. Default run is unchanged.
+var otelConsole = Environment.GetEnvironmentVariable("NSLABS_OTEL_CONSOLE") == "true";
+if (otelConsole)
+{
+    builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
+        .AddSource(BulkExecuteTelemetryNames.SourceName)
+        .AddConsoleExporter());
+}
+
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
 var scopeFactory = host.Services.GetRequiredService<IServiceScopeFactory>();
+
+if (otelConsole)
+{
+    // The TracerProvider is a lazy singleton and this host is never Start()ed,
+    // so resolve it once to attach the SDK listener; otherwise nothing exports.
+    _ = host.Services.GetRequiredService<TracerProvider>();
+}
 
 logger.LogInformation("NSLabs.EFCore.Extensions - Samples.Sqlite");
 logger.LogInformation("Connection: {Conn}", connectionString);
