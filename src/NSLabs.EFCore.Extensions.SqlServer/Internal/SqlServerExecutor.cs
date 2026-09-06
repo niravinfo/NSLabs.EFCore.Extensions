@@ -123,8 +123,6 @@ internal static class SqlServerExecutor
             command.Parameters.Add(dbParam);
         }
 
-        options.OnCommandText?.Invoke(chunk.CommandText);
-
         using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
 
         while (reader.FieldCount == 0 && await reader.NextResultAsync(cancellationToken).ConfigureAwait(false))

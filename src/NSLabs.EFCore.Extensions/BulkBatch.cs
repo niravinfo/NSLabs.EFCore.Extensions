@@ -1,6 +1,8 @@
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using NSLabs.EFCore.Extensions.DependencyInjection;
 using NSLabs.EFCore.Extensions.Internal;
 
 namespace NSLabs.EFCore.Extensions;
@@ -54,11 +56,44 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
     }
 
     public Task<BulkExecuteResult> ExecuteAsync(CancellationToken cancellationToken = default)
-        => ExecuteAsync(new BulkExecuteOptions(), cancellationToken);
+        => ExecuteCoreAsync(ResolveEffective(_context, explicitOptions: null), cancellationToken);
 
-    public async Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
+    public Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // No defensive copy: the caller's instance is used directly (validated, then read).
+        // Contract: do not mutate it while the returned task is in flight; sharing a
+        // read-only instance across calls and threads is safe.
+        options.Validate();
+        return ExecuteCoreAsync(options, cancellationToken);
+    }
+
+    internal static BulkExecuteOptions ResolveEffective(DbContext context, BulkExecuteOptions? explicitOptions)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        // Explicit object = full replacement (back-compat). Validated on entry, then used
+        // directly with no defensive copy (see contract on ExecuteAsync): the common
+        // high-throughput pattern — one shared read-only instance — stays allocation-free.
+        if (explicitOptions is not null)
+        {
+            explicitOptions.Validate();
+            return explicitOptions;
+        }
+
+        // Default path: per-DbContext snapshot by direct read-only reference (no clone,
+        // no validation — validated once in the extension constructor and immutable since),
+        // else factory defaults (valid by construction). Resolved here, at execution
+        // time, never at batch-construction time.
+        return context.GetService<IDbContextOptions>()
+            ?.FindExtension<BulkExecuteOptionsExtension>()
+            ?.SnapshotRef
+            ?? new BulkExecuteOptions();
+    }
+
+    private async Task<BulkExecuteResult> ExecuteCoreAsync(BulkExecuteOptions options, CancellationToken cancellationToken)
+    {
 
         if (_operations.Count == 0)
         {

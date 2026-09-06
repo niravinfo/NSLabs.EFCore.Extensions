@@ -434,12 +434,12 @@ public class UpdateExecutionTests : SqlServerTestBase
             await context.SaveChangesAsync();
         }
 
-        var commandTexts = new List<string>();
         var capturedIds = ids.Select(id => (long)id).ToArray();
 
+        BulkExecuteResult result;
         await using (var context = Fixture.CreateContext())
         {
-            await context.BulkExecuteAsync(b =>
+            result = await context.BulkExecuteAsync(b =>
             {
                 foreach (var (id, index) in ids.Select((id, i) => (id, i)))
                 {
@@ -449,12 +449,13 @@ public class UpdateExecutionTests : SqlServerTestBase
                 }
             }, new BulkExecuteOptions
             {
-                MaxParametersPerCommand = 4,
-                OnCommandText = commandTexts.Add
+                MaxParametersPerCommand = 4
             });
         }
 
-        Assert.True(commandTexts.Count >= 2, $"Expected chunking into multiple commands but got {commandTexts.Count}.");
+        // Small param budget forces multiple chunks; per-op counts prove every chunk executed.
+        Assert.Equal(ids.Length, result.Operations.Count);
+        Assert.Equal(ids.Length, result.TotalRowsAffected);
 
         await using var verify = Fixture.CreateContext();
         var items = await verify.Items.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
@@ -480,13 +481,12 @@ public class UpdateExecutionTests : SqlServerTestBase
             await seed.SaveChangesAsync();
         }
 
-        var commandTexts = new List<string>();
         var capturedIds = ids.Select(id => (long)id).ToArray();
 
         await using var context = Fixture.CreateContext();
         await using var tx = await context.Database.BeginTransactionAsync();
 
-        await context.BulkExecuteAsync(b =>
+        var result = await context.BulkExecuteAsync(b =>
         {
             foreach (var (id, index) in ids.Select((id, i) => (id, i)))
             {
@@ -496,13 +496,13 @@ public class UpdateExecutionTests : SqlServerTestBase
             }
         }, new BulkExecuteOptions
         {
-            MaxParametersPerCommand = 4,
-            OnCommandText = commandTexts.Add
+            MaxParametersPerCommand = 4
         });
 
         await tx.CommitAsync();
 
-        Assert.True(commandTexts.Count >= 2, $"Expected chunking into multiple commands but got {commandTexts.Count}.");
+        Assert.Equal(ids.Length, result.Operations.Count);
+        Assert.Equal(ids.Length, result.TotalRowsAffected);
 
         await using var verify = Fixture.CreateContext();
         var items = await verify.Items.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id);

@@ -118,8 +118,6 @@ internal static class NpgsqlExecutor
             command.Parameters.Add(dbParam);
         }
 
-        options.OnCommandText?.Invoke(chunk.CommandText);
-
         int rows;
         try
         {

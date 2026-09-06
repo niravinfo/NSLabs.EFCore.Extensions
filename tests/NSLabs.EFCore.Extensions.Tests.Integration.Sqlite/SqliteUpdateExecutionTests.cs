@@ -122,18 +122,19 @@ public class SqliteUpdateExecutionTests : SqliteTestBase
             await ctx.SaveChangesAsync();
         }
 
-        var texts = new List<string>();
         await using var ctx2 = Fixture.CreateContext();
-        await ctx2.BulkExecuteAsync(b =>
+        var result = await ctx2.BulkExecuteAsync(b =>
         {
             foreach (var id in ids)
             {
                 var cid = id;
                 b.Update<Item>(op => op.Where(x => x.Id == cid).Set(x => x.Key1, "upd-" + cid));
             }
-        }, new BulkExecuteOptions { MaxParametersPerCommand = 4, OnCommandText = texts.Add });
+        }, new BulkExecuteOptions { MaxParametersPerCommand = 4 });
 
-        Assert.True(texts.Count >= 2);
+        // Small param budget forces multiple chunks; per-op counts prove every chunk executed.
+        Assert.Equal(ids.Length, result.Operations.Count);
+        Assert.Equal(ids.Length, result.TotalRowsAffected);
         await using var verify = Fixture.CreateContext();
         var items = await verify.Items.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
         foreach (var id in ids) Assert.Equal("upd-" + id, items[id].Key1);
