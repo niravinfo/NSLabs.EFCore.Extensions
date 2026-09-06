@@ -75,19 +75,14 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             return explicitOptions.CloneAndValidate();
         }
 
-        // Default path: per-DbContext snapshot by direct read-only reference (no clone —
-        // execution never mutates it), else factory defaults. Resolved here, at execution
+        // Default path: per-DbContext snapshot by direct read-only reference (no clone,
+        // no validation — validated once in the extension constructor and immutable since),
+        // else factory defaults (valid by construction). Resolved here, at execution
         // time, never at batch-construction time.
-        var snapshotRef = context.GetService<IDbContextOptions>()
+        return context.GetService<IDbContextOptions>()
             ?.FindExtension<BulkExecuteOptionsExtension>()
-            ?.SnapshotRef;
-        if (snapshotRef is not null)
-        {
-            snapshotRef.Validate();
-            return snapshotRef;
-        }
-
-        return new BulkExecuteOptions();
+            ?.SnapshotRef
+            ?? new BulkExecuteOptions();
     }
 
     private async Task<BulkExecuteResult> ExecuteCoreAsync(BulkExecuteOptions options, CancellationToken cancellationToken)

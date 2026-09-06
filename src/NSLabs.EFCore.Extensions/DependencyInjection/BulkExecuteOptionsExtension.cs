@@ -18,7 +18,10 @@ public sealed class BulkExecuteOptionsExtension : IDbContextOptionsExtension
 
         // Copy-in: never store the caller-owned instance. The extension is shared across
         // pooled contexts and threads, so the stored snapshot must be privately owned.
+        // Validated here (not per-execution): the snapshot is immutable after this point,
+        // so re-validating it on every ExecuteAsync would always yield the same result.
         _options = options.Clone();
+        _options.Validate();
     }
 
     public BulkExecuteOptions Options => _options.Clone();
