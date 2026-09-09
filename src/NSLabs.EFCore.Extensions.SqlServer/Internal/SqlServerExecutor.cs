@@ -67,7 +67,7 @@ internal static class SqlServerExecutor
         {
             try
             {
-                instrumentation = BulkBatch.ResolveInstrumentationEffective(context);
+                instrumentation = BulkBatch.ResolveInstrumentationEffective();
                 dbSystem = BulkExecuteTelemetry.DbSystem(context.Database.ProviderName);
                 dbName = connection.Database;
                 if (string.IsNullOrEmpty(dbName))

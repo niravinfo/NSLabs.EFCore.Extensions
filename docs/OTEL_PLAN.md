@@ -31,7 +31,7 @@ Add first-class OpenTelemetry **tracing + logging** support to this library
 | Orchestration chokepoint | `src/NSLabs.EFCore.Extensions/BulkBatch.cs:95` `ExecuteCoreAsync` resolves provider via `BulkProviderRegistry`, calls `provider.Generate(...)` then `provider.ExecuteAsync(...)`, then builds `BulkExecuteResult` | Single place to open the **batch span** — provider-agnostic. |
 | Provider executors | `SqlServerExecutor.cs`, `SqliteExecutor.cs`, `NpgsqlExecutor.cs` — each has `ExecuteAsync → RunAsync → ExecuteCoreAsync → ExecuteChunkAsync`; each opens/closes the connection, honors `Database.CurrentTransaction`, honors `IExecutionStrategy`, honors `BulkExecuteOptions.CommandTimeout`, throws `BulkZeroRowsAffectedException` | Per-chunk spans must be added in **one shared helper** in the core assembly, called from the 3 `ExecuteChunkAsync` methods (1 line each), otherwise logic triplicates and drifts. |
 | Chunk model | `Internal/SqlChunkPlan.cs`: `CommandText`, `Parameters` (`SqlParam`), `OperationIndices` | Span attributes must be **derived counts**, never the text/values: `param_count`, `op_count`, op-kind mix. |
-| Options (execution) | `BulkExecuteOptions.cs`: `MaxParametersPerCommand=2000`, `ThrowIfZeroAffected`, `CommandTimeout`; `Clone/CopyTo/Validate`; per-context defaults via `DependencyInjection/BulkExecuteOptionsExtension.cs` + `BulkExecuteBuilderExtensions.cs` (`UseBulkExecute`); `LogFragment` / `PopulateDebugInfo` expose values to EF debug | **Stays untouched.** Execution semantics only. Telemetry policy lives in a **separate** `BulkInstrumentationOptions` + `UseBulkInstrumentation` extension (§5) — never new properties on `BulkExecuteOptions`. An explicit per-call `BulkExecuteOptions` replaces execution config only and must not reset instrumentation. |
+| Options (execution) | `BulkExecuteOptions.cs`: `MaxParametersPerCommand=2000`, `ThrowIfZeroAffected`, `CommandTimeout`; `Clone/CopyTo/Validate`; per-context defaults via `DependencyInjection/BulkExecuteOptionsExtension.cs` + `BulkExecuteBuilderExtensions.cs` (`UseBulkExecute`); `LogFragment` / `PopulateDebugInfo` expose values to EF debug | **Stays untouched.** Execution semantics only. Telemetry policy lives in a **separate** process-wide `BulkInstrumentationOptions` + `AddNSLabsBulkInstrumentation` setup call (§5) — never new properties on `BulkExecuteOptions`, never `DbContext` options. An explicit per-call `BulkExecuteOptions` replaces execution config only and must not reset instrumentation. |
 | Logging | No `ILogger` / `Activity` / `DiagnosticSource` usage in `src/*` today (grep-verified). Samples use `Microsoft.Extensions.Logging.Console`; `Directory.Packages.props` pins `Logging.Abstractions 10.0.0` for samples only. Core `csproj` references only `Microsoft.EntityFrameworkCore.Relational` (which transitively brings Abstractions, but core does **not** directly reference it) | Core must add a **direct** `Microsoft.Extensions.Logging.Abstractions` reference only if we log from core (recommended: yes, for error/debug logs that OTel logging bridges automatically). `System.Diagnostics.DiagnosticSource` needs **no package** on .NET 10 (inbox: `Activity` / `ActivitySource` are in the shared framework). |
 | Build | `Directory.Build.props`: `net10.0`, `Nullable enable`, `ImplicitUsings enable`, `LangVersion latest`; `Directory.Packages.props`: central version management, `CentralPackageTransitivePinningEnabled=false`; solution is `NSLabs.EFCore.Extensions.slnx` | OTel SDK/exporter packages go **only** in `samples/*` and `tests/*` via new `PackageVersion` entries; `src/*` stays dependency-free. `LangVersion latest` allows `required` / collection expressions already in use. |
 | Tests | `Tests.Unit.{Shared,SqlServer,Sqlite,Npgsql}` (golden-SQL), `Tests.Integration.{...}` (Testcontainers + SQLite), `Tests.Common` (has `InternalsVisibleTo` from core) | Telemetry unit tests must run with **no container** (in-memory BCL `ActivityListener`); integration test asserts trace→DB correlation lives in the existing integration projects. |
@@ -115,8 +115,8 @@ suffix, e.g. `SqlClientInstrumentationOptions`, `AspNetCoreInstrumentationOption
 namespace NSLabs.EFCore.Extensions;
 
 /// <summary>
-/// Observability policy for bulk execution. Configured via
-/// <c>UseBulkInstrumentation(...)</c>; independent of <see cref="BulkExecuteOptions"/>.
+/// Observability policy for bulk execution. Configured once at startup via
+/// <c>services.AddNSLabsBulkInstrumentation(...)</c>; independent of <see cref="BulkExecuteOptions"/>.
 /// </summary>
 public sealed class BulkInstrumentationOptions
 {
@@ -143,25 +143,24 @@ public sealed class BulkInstrumentationOptions
 }
 ```
 
-Configuration mirrors the existing `UseBulkExecute` pattern but as an **independent
-extension** (separate `IDbContextOptionsExtension`, separate `LogFragment` /
-`PopulateDebugInfo` keys `BulkInstrumentation:...`, additive repeated calls,
-copy-in clone so pooled contexts can't observe caller mutation):
+Configuration is a **separate startup call** (not a `DbContext` options
+extension, not per-call): one process-wide policy set via
+`services.AddNSLabsBulkInstrumentation(...)` (thin wrapper over
+`BulkInstrumentation.Configure(...)`), additive repeated calls,
+copy-in clone so later caller mutation is never observed:
 
-- `DbContextOptionsBuilder.UseBulkInstrumentation(Action<BulkInstrumentationOptions>)`
-  (+ `BulkInstrumentationOptions` overload, + generic `DbContextOptionsBuilder<TContext>` variants)
-  in `DependencyInjection/BulkInstrumentationBuilderExtensions.cs`
-  (namespace `Microsoft.EntityFrameworkCore`, same as existing builder extensions).
-- `DependencyInjection/BulkInstrumentationOptionsExtension.cs` holding a private cloned snapshot,
-  `SnapshotRef` internal accessor, `GetServiceProviderHashCode() => 0` with the same
-  no-services rationale as the execution extension.
-- Resolution: new `BulkBatch.ResolveInstrumentationEffective(DbContext)` reading
-  `FindExtension<BulkInstrumentationOptionsExtension>()?.SnapshotRef ?? new BulkInstrumentationOptions()`
-  at execution time (never at batch-construction time). An explicit per-call
-  `BulkExecuteOptions` argument replaces **execution** config only — instrumentation
-  still resolves from the context. No `ExecuteAsync` overload takes instrumentation
-  options (ambient policy, not per-call; per-call toggles would produce inconsistent
-  redaction across batches and fight the SDK sampler — the standard OTel stance).
+- `BulkInstrumentation.Configure(Action<BulkInstrumentationOptions>)`
+  (+ `BulkInstrumentationOptions` overload, + `Reset()` for tests)
+  in `BulkInstrumentation.cs`
+- `DependencyInjection/BulkInstrumentationServiceExtensions.cs` with
+  `IServiceCollection.AddNSLabsBulkInstrumentation(...)`
+  (namespace `Microsoft.Extensions.DependencyInjection`).
+- Resolution: `BulkBatch.ResolveInstrumentationEffective()` returning
+  `BulkInstrumentation.SnapshotRef` (process-wide snapshot, else factory
+  defaults). An explicit per-call `BulkExecuteOptions` argument replaces
+  **execution** config only — instrumentation is ambient and never per-call
+  (per-call toggles would produce inconsistent redaction across batches
+  and fight the SDK sampler — the standard OTel stance).
 
 Rejected alternatives (recorded so they aren't re-litigated):
 
@@ -202,13 +201,13 @@ public static class BulkExecuteTelemetryNames
    - Both scopes: `IDisposable`, stop on dispose, `SetError(Exception)` helper doing `RecordException + SetStatus(Error) + error.type tag` (exception event gated by `RecordException`; `Status=Error` always).
 2. **EDIT** `src/NSLabs.EFCore.Extensions/BulkBatch.cs:95` `ExecuteCoreAsync`:
    - Empty-batch fast path stays spanless (document in XML remark).
-   - Resolve both axes: existing `ResolveEffective(context, explicitOptions)` for execution + new `ResolveInstrumentationEffective(context)` for instrumentation (context snapshot, else defaults). Explicit per-call execution options do not alter instrumentation.
+   - Resolve execution via existing `ResolveEffective(context, explicitOptions)` + instrumentation via new parameterless `ResolveInstrumentationEffective()` (process-wide snapshot, else defaults). Explicit per-call execution options do not alter instrumentation.
    - After `provider.Generate`, open batch scope; wrap `provider.ExecuteAsync` in try/catch: on success set `total_rows` on the span; on `Exception` (including `BulkZeroRowsAffectedException` and cancellation) call `SetError`, rethrow preserving stack (`ExceptionDispatchInfo` not needed — plain `throw;`).
    - Retry-attempt detection: increment a local counter via a callback — simplest truthful approach: the executors expose attempts through the existing structure (each `RunAsync` re-entry = 1 attempt); pass an `Action`/`int[]` attempt counter into `provider.ExecuteAsync`? That changes `IBulkProvider` signature — **avoid**. Instead: batch scope records attempts = number of `chunk.failed`-with-retry… Simpler correct rule: record `retry.attempt` events from inside the shared chunk helper when it observes the same chunk index executing twice (track in scope). Document this mechanism in code comment.
 3. **EDIT** the 3 executors (`SqlServer/Internal/SqlServerExecutor.cs`, `Sqlite/.../SqliteExecutor.cs`, `Npgsql/.../NpgsqlExecutor.cs`):
    - `ExecuteChunkAsync`: wrap body with `using var scope = BulkExecuteTelemetry.StartChunkScope(...)`; set `rows` on success; `SetError` + rethrow on failure. No other logic change. (SqlServer reads rowcounts via reader; Sqlite/Npgsql via `ExecuteNonQueryAsync` — helper takes final rows as parameter, so call sites differ by one line; keep the diff minimal.)
    - Zero-row no-op early return: call `BulkExecuteTelemetry.RecordChunkSkipped(parentActivity, index)` (event, no span).
-4. **NEW** `src/NSLabs.EFCore.Extensions/BulkInstrumentationOptions.cs` (public, §5: `EnableChunkSpans`, `RecordException`, `CaptureCommandText`, `MaxCommandLength` + `Clone`/`CopyTo`/`Validate` + XML docs) **plus** `DependencyInjection/BulkInstrumentationOptionsExtension.cs` + `DependencyInjection/BulkInstrumentationBuilderExtensions.cs` (`UseBulkInstrumentation`, same additive copy-in pattern as `UseBulkExecute`, `LogFragment`/`PopulateDebugInfo` keys `BulkInstrumentation:...`). `BulkExecuteOptions*` files are **not modified**.
+4. **NEW** `src/NSLabs.EFCore.Extensions/BulkInstrumentationOptions.cs` (public, §5: `EnableChunkSpans`, `RecordException`, `CaptureCommandText`, `MaxCommandLength` + `Clone`/`CopyTo`/`Validate` + XML docs) **plus** `BulkInstrumentation.cs` (public static process-wide policy: `Configure`/`Reset`/`Current`) + `DependencyInjection/BulkInstrumentationServiceExtensions.cs` (`AddNSLabsBulkInstrumentation`). `BulkExecuteOptions*` files are **not modified** and no `IDbContextOptionsExtension` is added for instrumentation.
 5. **NEW** `BulkExecuteTelemetryNames.cs` (public, §5) + XML docs.
 
 ### Phase 2 — Logging wiring (1 package addition)
@@ -227,7 +226,7 @@ public static class BulkExecuteTelemetryNames
    - `Chunk_spans_disabled_by_option` (`EnableChunkSpans=false` → batch span only).
    - `CommandText_never_captured_by_default` + `CaptureCommandText_opt_in_truncates` (truncated at `MaxCommandLength` + `nslabs.bulk.command_truncated`).
    - `Explicit_BulkExecuteOptions_does_not_reset_instrumentation` (axis independence).
-   - `UseBulkInstrumentation_additive_and_validated` + `Instrumentation_factory_defaults_are_safe` + `Instrumentation_clone_is_independent_of_source` + `BulkExecuteOptions_untouched_by_instrumentation`.
+   - `UseBulkInstrumentation_additive_and_validated` + `Instrumentation_factory_defaults_are_safe` + `Instrumentation_clone_is_independent_of_source` + `BulkExecuteOptions_untouched_by_instrumentation` (all via the process-wide `BulkInstrumentation` API with `Reset()` isolation).
    - `Empty_batch_emits_no_span`.
    - `Cancellation_marks_span_error` (pre-canceled token → `OperationCanceledException`, span `Error` + `error.type`).
 9. **EDIT** integration projects (`.Integration.Sqlite` first — no container; then SqlServer/Npgsql): one test each asserting parent-child propagation (`Activity.Current` set by test → batch span `ParentId` equals it) and `db.system` value per provider.
@@ -259,10 +258,10 @@ public static class BulkExecuteTelemetryNames
 ## 8. Acceptance criteria
 
 - [x] `dotnet pack` shows **zero** new dependencies on `NSLabs.EFCore.Extensions*` packages (only `Logging.Abstractions`, already centrally pinned; verified via build — no `OpenTelemetry*` in `src/`).
-- [x] `BulkExecuteOptions*` files untouched; telemetry knobs exist only on `BulkInstrumentationOptions` + `UseBulkInstrumentation`.
+- [x] `BulkExecuteOptions*` files untouched; telemetry knobs exist only on process-wide `BulkInstrumentationOptions` + `AddNSLabsBulkInstrumentation`.
 - [x] With no listener: existing golden-SQL + integration suites pass unchanged (246 tests: 53 Sqlite unit incl. 15 new telemetry tests, 121 SqlServer unit, 39 Npgsql unit, 33 Sqlite integration).
 - [x] With listener: 1 `BulkExecute` span per non-empty batch with attributes exactly per §4.1; 1 `BulkExecute.Chunk` span per executed chunk per §4.2 (suppressible via `EnableChunkSpans=false`); error path sets `Error` + exception event (suppressible via `RecordException=false`, status retained).
-- [x] `db.statement` absent by default; present + truncated at `MaxCommandLength` only with `UseBulkInstrumentation(o => o.CaptureCommandText = true)`; explicit per-call `BulkExecuteOptions` does not clear it.
+- [x] `db.statement` absent by default; present + truncated at `MaxCommandLength` only with `AddNSLabsBulkInstrumentation(o => o.CaptureCommandText = true)`; explicit per-call `BulkExecuteOptions` does not clear it.
 - [x] Sample runs and exports a trace with stock OTel SDK wiring (`NSLABS_OTEL_CONSOLE=true` → 89 spans with full tags; unset → zero spans).
 - [x] README + DESIGN observability notes added; this plan file linked from the PR.
 
@@ -271,8 +270,8 @@ public static class BulkExecuteTelemetryNames
 1. Keep `db.name` by default, or drop it for cardinality safety? (Proposal: keep — EF users expect it; processors can drop.)
 2. Should the empty-batch fast path emit a span? (Proposal: no — no I/O happened.)
 3. Class name: `BulkInstrumentationOptions` (OTel convention) vs `BulkTelemetryOptions`? (Proposal: `BulkInstrumentationOptions`.)
-4. Future companion package (`NSLabs.EFCore.Extensions.OpenTelemetry` with `AddNSLabsBulkInstrumentation`) mapping 1:1 onto these options — wanted, or is `UseBulkInstrumentation` sufficient permanently?
+4. Future companion package (`NSLabs.EFCore.Extensions.OpenTelemetry` with OTel-pipeline-native configuration) mapping 1:1 onto these options — wanted, or is `AddNSLabsBulkInstrumentation` sufficient permanently? (Decided: separate startup call, no `DbContext` coupling.)
 
 ## 10. Estimated scope
 
-Small–medium: ~6 new files (`BulkInstrumentationOptions`, 2 DI files, telemetry helper, names, tests), ~7 edited files, ~10 new tests. No migrations, no SQL changes, no changes to `BulkExecuteOptions*`, no public signature changes (one new options class + one new `UseBulkInstrumentation` extension family only). No metrics work.
+Small–medium: ~5 new files (`BulkInstrumentationOptions`, `BulkInstrumentation`, service extension, telemetry helper, names, tests), ~7 edited files, ~10 new tests. No migrations, no SQL changes, no changes to `BulkExecuteOptions*`, no public signature changes (one new options class + one static policy + one `AddNSLabsBulkInstrumentation` extension only). No metrics work.

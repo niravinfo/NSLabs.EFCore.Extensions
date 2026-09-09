@@ -94,18 +94,13 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             ?? new BulkExecuteOptions();
     }
 
-    internal static BulkInstrumentationOptions ResolveInstrumentationEffective(DbContext context)
+    internal static BulkInstrumentationOptions ResolveInstrumentationEffective()
     {
-        ArgumentNullException.ThrowIfNull(context);
-
-        // Independent axis from execution options: an explicit per-call
-        // BulkExecuteOptions never resets instrumentation policy. Same snapshot
-        // semantics as ResolveEffective — direct read-only reference when configured,
-        // else factory defaults (valid by construction).
-        return context.GetService<IDbContextOptions>()
-            ?.FindExtension<BulkInstrumentationOptionsExtension>()
-            ?.SnapshotRef
-            ?? new BulkInstrumentationOptions();
+        // Process-wide policy set via services.AddNSLabsBulkInstrumentation(...)
+        // or BulkInstrumentation.Configure(...); else factory defaults (valid by
+        // construction). Deliberately independent of DbContext configuration and
+        // of any explicit per-call BulkExecuteOptions.
+        return BulkInstrumentation.SnapshotRef;
     }
 
     private async Task<BulkExecuteResult> ExecuteCoreAsync(BulkExecuteOptions options, CancellationToken cancellationToken)
@@ -148,7 +143,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             tracing = BulkExecuteTelemetry.Source.HasListeners();
             if (tracing || logger?.IsEnabled(LogLevel.Debug) == true)
             {
-                instrumentation = ResolveInstrumentationEffective(_context);
+                instrumentation = ResolveInstrumentationEffective();
             }
         }
         catch

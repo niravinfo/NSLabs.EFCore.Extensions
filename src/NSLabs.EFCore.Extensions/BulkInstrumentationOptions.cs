@@ -1,8 +1,9 @@
 namespace NSLabs.EFCore.Extensions;
 
 /// <summary>
-/// Observability policy for bulk execution. Configured via
-/// <c>UseBulkInstrumentation(...)</c>; independent of <see cref="BulkExecuteOptions"/>.
+/// Observability policy for bulk execution. Configured once at startup via
+/// <c>services.AddNSLabsBulkInstrumentation(...)</c> or
+/// <see cref="BulkInstrumentation"/>; independent of <see cref="BulkExecuteOptions"/>.
 /// An explicit per-call <see cref="BulkExecuteOptions"/> replaces execution
 /// configuration only and never resets these settings.
 /// </summary>

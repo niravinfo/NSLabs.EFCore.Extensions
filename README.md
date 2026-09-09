@@ -103,10 +103,10 @@ Bulk execution emits traces with **zero required dependencies** (inbox `Activity
 
 - One `BulkExecute` client span per non-empty batch, with one `BulkExecute.Chunk` child span per executed chunk (DB round-trip). Spans nest under your ambient `Activity.Current`.
 - PII-safe by default: counts, provider/operation names, row counts. SQL text is never attached unless you opt in; parameter values never.
-- Opt-in policy (independent of `BulkExecuteOptions`, configured per `DbContext`):
+- Opt-in policy (process-wide, configured once at startup — independent of `BulkExecuteOptions` and `DbContext` setup):
 
 ```csharp
-options.UseBulkInstrumentation(o =>
+builder.Services.AddNSLabsBulkInstrumentation(o =>
 {
     o.EnableChunkSpans = true;      // per-chunk child spans (default true)
     o.RecordException = true;       // "exception" span events (default true)

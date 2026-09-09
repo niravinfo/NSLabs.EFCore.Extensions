@@ -238,9 +238,10 @@ so logging, interceptors, and retry strategies keep working.
 > fire for these round-trips. The library therefore emits its own spans instead:
 > one `BulkExecute` client span per batch (opened in `BulkBatch.ExecuteCoreAsync`)
 > with one `BulkExecute.Chunk` child span per executed chunk (all three provider
-> executors share one helper — no triplicated logic). Policy lives in
-> `BulkInstrumentationOptions` (`UseBulkInstrumentation`), deliberately separate
-> from `BulkExecuteOptions`. Full schema: `docs/OTEL_PLAN.md` §4.
+> executors share one helper — no triplicated logic). Policy is process-wide
+> (`services.AddNSLabsBulkInstrumentation(...)` / `BulkInstrumentation.Configure`,
+> deliberately separate from `DbContext` setup and from `BulkExecuteOptions`).
+> Full schema: `docs/OTEL_PLAN.md` §4.
 
 ---
 

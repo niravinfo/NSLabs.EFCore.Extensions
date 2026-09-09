@@ -11,8 +11,15 @@ public sealed class TelemetryCollection
 }
 
 [Collection("telemetry")]
-public class SqliteTelemetryTests
+public class SqliteTelemetryTests : IDisposable
 {
+    public void Dispose()
+    {
+        // Process-wide policy leaks across tests without this; the telemetry
+        // collection is non-parallel so Reset here isolates each test.
+        BulkInstrumentation.Reset();
+    }
+
     private sealed class Capture : IDisposable
     {
         private readonly ActivityListener _listener;
@@ -51,12 +58,12 @@ public class SqliteTelemetryTests
 
     private static TestDbContext CreateDatabase(Action<BulkInstrumentationOptions>? configureInstrumentation = null)
     {
-        var builder = new DbContextOptionsBuilder<TestDbContext>().UseSqlite("DataSource=:memory:");
         if (configureInstrumentation is not null)
         {
-            builder.UseBulkInstrumentation(configureInstrumentation);
+            BulkInstrumentation.Configure(configureInstrumentation);
         }
 
+        var builder = new DbContextOptionsBuilder<TestDbContext>().UseSqlite("DataSource=:memory:");
         var context = new TestDbContext(builder.Options);
         context.Database.OpenConnection();
         context.Database.EnsureCreated();
@@ -356,28 +363,32 @@ public class SqliteTelemetryTests
     }
 
     [Fact]
-    public void UseBulkInstrumentation_is_additive_and_validated()
+    public void Instrumentation_configure_is_additive_copy_in_and_validated()
     {
-        var builder = new DbContextOptionsBuilder<TestDbContext>().UseSqlite("DataSource=:memory:");
-        builder.UseBulkInstrumentation(o => o.CaptureCommandText = true);
-        builder.UseBulkInstrumentation(o => o.MaxCommandLength = 100);
+        BulkInstrumentation.Configure(o => o.CaptureCommandText = true);
+        BulkInstrumentation.Configure(o => o.MaxCommandLength = 100);
 
-        var snapshot = builder.Options.FindExtension<BulkInstrumentationOptionsExtension>()
-            ?? throw new InvalidOperationException("Expected BulkInstrumentationOptionsExtension to be present.");
-        Assert.True(snapshot.Options.CaptureCommandText);
-        Assert.Equal(100, snapshot.Options.MaxCommandLength);
+        Assert.True(BulkInstrumentation.Current.CaptureCommandText);
+        Assert.Equal(100, BulkInstrumentation.Current.MaxCommandLength);
 
-        var bad = new DbContextOptionsBuilder<TestDbContext>().UseSqlite("DataSource=:memory:");
-        Assert.Throws<ArgumentOutOfRangeException>(() => bad.UseBulkInstrumentation(o => o.MaxCommandLength = 0));
+        // Copy-in: later mutations of the caller's instance are never observed.
+        var source = new BulkInstrumentationOptions { MaxCommandLength = 200 };
+        BulkInstrumentation.Configure(source);
+        source.MaxCommandLength = 4000;
+        Assert.Equal(200, BulkInstrumentation.Current.MaxCommandLength);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => BulkInstrumentation.Configure(o => o.MaxCommandLength = 0));
     }
 
     [Fact]
     public void BulkExecuteOptions_untouched_by_instrumentation()
     {
+        BulkInstrumentation.Configure(o => o.CaptureCommandText = true);
+
         var builder = new DbContextOptionsBuilder<TestDbContext>().UseSqlite("DataSource=:memory:");
-        builder.UseBulkInstrumentation(o => o.CaptureCommandText = true);
 
         // Execution extension is independent: absent unless configured.
         Assert.Null(builder.Options.FindExtension<BulkExecuteOptionsExtension>());
+        Assert.True(BulkInstrumentation.Current.CaptureCommandText);
     }
 }
