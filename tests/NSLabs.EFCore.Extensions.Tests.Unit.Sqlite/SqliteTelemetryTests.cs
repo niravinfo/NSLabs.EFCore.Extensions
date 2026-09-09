@@ -215,7 +215,7 @@ public class SqliteTelemetryTests
         var batch = FindBatch(capture, operationCount: 1);
         Assert.Equal(ActivityStatusCode.Error, batch.Status);
         Assert.Equal(typeof(BulkZeroRowsAffectedException).FullName, Tag(batch, "error.type"));
-        Assert.Empty(batch.Events.Where(e => e.Name == "exception"));
+        Assert.DoesNotContain(batch.Events, e => e.Name == "exception");
     }
 
     [Fact]
@@ -236,7 +236,7 @@ public class SqliteTelemetryTests
         Assert.Equal(2, result.TotalRowsAffected);
         var batch = FindBatch(capture, operationCount: 2);
         Assert.Equal(ActivityStatusCode.Unset, batch.Status);
-        Assert.Equal(0, FindChunks(capture, batch).Count);
+        Assert.Empty(FindChunks(capture, batch));
     }
 
     [Fact]

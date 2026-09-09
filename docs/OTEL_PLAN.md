@@ -264,7 +264,7 @@ public static class BulkExecuteTelemetryNames
 - [x] With listener: 1 `BulkExecute` span per non-empty batch with attributes exactly per §4.1; 1 `BulkExecute.Chunk` span per executed chunk per §4.2 (suppressible via `EnableChunkSpans=false`); error path sets `Error` + exception event (suppressible via `RecordException=false`, status retained).
 - [x] `db.statement` absent by default; present + truncated at `MaxCommandLength` only with `UseBulkInstrumentation(o => o.CaptureCommandText = true)`; explicit per-call `BulkExecuteOptions` does not clear it.
 - [x] Sample runs and exports a trace with stock OTel SDK wiring (`NSLABS_OTEL_CONSOLE=true` → 89 spans with full tags; unset → zero spans).
-- [ ] README + DESIGN observability notes added; this plan file linked from the PR.
+- [x] README + DESIGN observability notes added; this plan file linked from the PR.
 
 ## 9. Open questions (for reviewer, before coding)
 

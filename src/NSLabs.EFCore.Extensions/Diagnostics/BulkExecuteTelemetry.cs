@@ -146,8 +146,15 @@ internal static class BulkExecuteTelemetry
         string? dbSystem,
         string? dbName)
     {
+        // Check-then-allocate: no listener means zero overhead — return before
+        // allocating the fallback options when the caller passed null.
+        if (!Source.HasListeners())
+        {
+            return null;
+        }
+
         var instr = instrumentation ?? new BulkInstrumentationOptions();
-        if (!instr.EnableChunkSpans || !Source.HasListeners())
+        if (!instr.EnableChunkSpans)
         {
             return null;
         }
