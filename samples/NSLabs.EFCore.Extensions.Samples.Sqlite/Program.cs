@@ -33,18 +33,19 @@ builder.Services.AddDbContext<SampleDbContext>(options =>
     options.UseSqlite(connectionString);
 });
 
-// Separate observability policy (process-wide, independent of DbContext setup).
-// Defaults shown; call once here instead of per-DbContext configuration.
-builder.Services.AddNSLabsBulkInstrumentation(o =>
-{
-    o.CaptureCommandText = false;
-});
-
 // Observability demo (opt-in): NSLABS_OTEL_CONSOLE=true exports bulk-execution
-// spans (BulkExecute + BulkExecute.Chunk) to the console. Default run is unchanged.
+// spans (BulkExecute + BulkExecute.Chunk) to the console, including db.statement
+// so you can verify spans flow AND inspect the generated SQL. Default run is
+// unchanged (library defaults: no SQL text captured). Demo-only opt-in — keep
+// CaptureCommandText=false in production.
 var otelConsole = Environment.GetEnvironmentVariable("NSLABS_OTEL_CONSOLE") == "true";
 if (otelConsole)
 {
+    builder.Services.AddNSLabsBulkInstrumentation(o =>
+    {
+        o.CaptureCommandText = true;
+    });
+
     builder.Services.AddOpenTelemetry().WithTracing(tracing => tracing
         .AddSource(BulkExecuteTelemetryNames.SourceName)
         .AddConsoleExporter());
