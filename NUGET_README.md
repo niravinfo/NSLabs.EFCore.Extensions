@@ -65,7 +65,7 @@ var result = await db.BulkExecuteAsync(b =>
 });
 
 // per-op counts (SQL Server)
-result.Operations[0].RowsAffected
+result.Operations[0].RowsAffected;
 ```
 
 ### Simple Helper (single table)
@@ -78,9 +78,6 @@ await db.Items.BulkUpdateAsync(b =>
     b.Add(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "Value1"));
     b.Add(op => op.Where(x => x.Key1 == "Old").Set(x => x.Key3, 0));
 });
-
-// also works with a list of items
-await db.Items.BulkUpdateAsync(new[] { e1, e2 });
 ```
 
 ### Deferred Builder
