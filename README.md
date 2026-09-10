@@ -60,9 +60,6 @@ await db.Items.BulkUpdateAsync(b =>
     b.Add(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "Value1"));
     b.Add(op => op.Where(x => x.Key1 == "Old").Set(x => x.Key3, 0));
 });
-
-// also works with a list of items
-await db.Items.BulkUpdateAsync(new[] { e1, e2 });
 ```
 
 ### Atomic (server-side computed) updates
@@ -82,7 +79,7 @@ await db.BulkExecuteAsync(b =>
 });
 ```
 
-Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`), conditionals (`? :`), coalesce (`??`), string methods (`ToUpper/ToLower/Trim/Substring/Replace/Concat`), `Math` (`Abs/Ceiling/Floor/Round/Truncate`) — same as EF Core `ExecuteUpdate`'s `SetProperty`. Works in upsert `Set(...)` too (applies to the matched-row update).
+Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`), conditionals (`? :`), coalesce (`??`), string methods (`ToUpper/ToLower/Trim/Substring/Replace/Concat`), `Math` (`Abs/Ceiling/Floor/Round/Truncate`) — same as EF Core `ExecuteUpdate`'s `SetProperty`.
 
 ### Deferred builder
 

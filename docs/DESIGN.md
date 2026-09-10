@@ -73,7 +73,7 @@ var r = await db.BulkExecuteAsync(b =>
                                       .Update(v => v.Views, v => v.Views + 1)
                                       .Insert(new DailyArticleViews { ArticleId = 42, Date = today, Views = 1 }));
 
-    b.Delete<AuditLog>(op => op.Where(x => x.Created < cutoff));   // future op type
+    b.Delete<AuditLog>(op => op.Where(x => x.Created < cutoff));
 });
 ```
 
@@ -134,19 +134,6 @@ var result = await db.Items.BulkUpdateAsync(b =>
 }, ct);
 ```
 
-### Style B — Entity Instance Based (sugar, full-row semantics)
-
-```csharp
-// Partial entities carrying values; matched by PK by default.
-await db.Items.BulkUpdateAsync(new[] { e1, e2, e3 });
-await db.Items.BulkUpsertAsync(new[] { e1, e2, e3 });
-
-// Custom match instead of PK:
-await db.Items.BulkUpdateAsync(
-    source: rows,
-    match: (row, x) => x.Code == row.Code);
-```
-
 ### Semantic Contract
 
 | Aspect | Expression style | Entity style |
@@ -175,23 +162,8 @@ await db.Items.BulkUpsertAsync(b =>
 
 ### Result Object
 
-Per-operation affected-row counts are supported on SQL Server in v1 (same round trip).
-Other providers fall back to total-only until implemented; capability exposed via
-`SupportsPerOperationCounts` flag.
-
-```csharp
-public sealed class BulkUpdateResult
-{
-    public int TotalRowsAffected { get; }
-    public IReadOnlyList<OperationResult> Operations { get; }
-}
-
-public sealed class OperationResult
-{
-    public string EntityType { get; }  // e.g. "Item", "Order"
-    public int RowsAffected { get; }   // index maps back to global b.* call order
-}
-```
+Per-operation affected-row counts are returned in the same round trip.
+See `BulkExecuteResult` / `OperationResult` in `src/NSLabs.EFCore.Extensions/BulkExecuteResult.cs`.
 
 Multi-table calls share the parameter budget (~2100 on SQL Server) across all operations;
 chunk boundaries may fall anywhere in the sequence. When wrapped in an ambient `Database.CurrentTransaction`, all chunks run inside that single transaction with order preserved; otherwise each statement uses its implicit per-statement transaction (see `README.md#transactions`).
