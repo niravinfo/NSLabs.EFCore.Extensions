@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using NSLabs.EFCore.Extensions.Diagnostics;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -23,8 +24,18 @@ internal static class SqliteExecutor
         var strategy = database.CreateExecutionStrategy();
         if (strategy.RetriesOnFailure)
         {
+            var attempt = 0;
             return strategy.ExecuteAsync(
-                () => RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken));
+                () =>
+                {
+                    if (attempt > 0)
+                    {
+                        BulkExecuteTelemetry.RecordRetryAttempt(attempt);
+                    }
+
+                    attempt++;
+                    return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+                });
         }
 
         return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
@@ -48,6 +59,31 @@ internal static class SqliteExecutor
         var transaction = database.CurrentTransaction?.GetDbTransaction();
         var shouldCloseConnection = false;
 
+        // Chunk telemetry context — resolved only when observed (active
+        // ActivityListener). Null means defaults; StartChunkScope re-checks.
+        BulkInstrumentationOptions? instrumentation = null;
+        string? dbSystem = null;
+        string? dbName = null;
+        if (BulkExecuteTelemetry.Source.HasListeners())
+        {
+            try
+            {
+                instrumentation = BulkBatch.ResolveInstrumentationEffective();
+                dbSystem = BulkExecuteTelemetry.DbSystem(context.Database.ProviderName);
+                dbName = connection.Database;
+                if (string.IsNullOrEmpty(dbName))
+                {
+                    dbName = null;
+                }
+            }
+            catch
+            {
+                instrumentation = null;
+                dbSystem = null;
+                dbName = null;
+            }
+        }
+
         try
         {
             if (closeConnection && connection.State == ConnectionState.Closed)
@@ -56,7 +92,7 @@ internal static class SqliteExecutor
                 shouldCloseConnection = true;
             }
 
-            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken).ConfigureAwait(false);
+            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken, instrumentation, dbSystem, dbName).ConfigureAwait(false);
 
             if (options.ThrowIfZeroAffected)
             {
@@ -82,11 +118,14 @@ internal static class SqliteExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        BulkInstrumentationOptions? instrumentation = null,
+        string? dbSystem = null,
+        string? dbName = null)
     {
-        foreach (var chunk in chunks)
+        for (var i = 0; i < chunks.Count; i++)
         {
-            await ExecuteChunkAsync(connection, chunk, transaction, counts, options, cancellationToken).ConfigureAwait(false);
+            await ExecuteChunkAsync(connection, chunks[i], transaction, counts, options, cancellationToken, i, instrumentation, dbSystem, dbName).ConfigureAwait(false);
         }
     }
 
@@ -96,44 +135,60 @@ internal static class SqliteExecutor
         System.Data.Common.DbTransaction? transaction,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int chunkIndex = 0,
+        BulkInstrumentationOptions? instrumentation = null,
+        string? dbSystem = null,
+        string? dbName = null)
     {
         // Zero-row upsert no-op
         if (chunk.Parameters.Count == 0 && chunk.CommandText.StartsWith("-- zero-row", StringComparison.Ordinal))
         {
             // counts already zero
+            BulkExecuteTelemetry.RecordChunkSkipped(chunkIndex);
             return;
         }
 
-        using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = chunk.CommandText;
-        if (options.CommandTimeout is { } timeout) command.CommandTimeout = timeout;
-
-        foreach (var param in chunk.Parameters)
-        {
-            var dbParam = command.CreateParameter();
-            dbParam.ParameterName = param.Name;
-            dbParam.Value = param.Value ?? DBNull.Value;
-            command.Parameters.Add(dbParam);
-        }
-
-        int rows;
+        using var scope = BulkExecuteTelemetry.StartChunkScope(chunk, chunkIndex, instrumentation, dbSystem, dbName);
         try
         {
-            rows = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19 || ex.Message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("ON CONFLICT", StringComparison.OrdinalIgnoreCase))
-        {
-            // Surface with hint about UNIQUE constraint requirement
-            throw new InvalidOperationException(
-                $"SQLite ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint. Ensure a UNIQUE index exists on the conflict target columns. SQLite error: {ex.Message}", ex);
-        }
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = chunk.CommandText;
+            if (options.CommandTimeout is { } timeout) command.CommandTimeout = timeout;
 
-        // OperationIndices for sqlite per-unit chunks are single element
-        foreach (var idx in chunk.OperationIndices)
+            foreach (var param in chunk.Parameters)
+            {
+                var dbParam = command.CreateParameter();
+                dbParam.ParameterName = param.Name;
+                dbParam.Value = param.Value ?? DBNull.Value;
+                command.Parameters.Add(dbParam);
+            }
+
+            int rows;
+            try
+            {
+                rows = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteErrorCode == 19 || ex.Message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("ON CONFLICT", StringComparison.OrdinalIgnoreCase))
+            {
+                // Surface with hint about UNIQUE constraint requirement
+                throw new InvalidOperationException(
+                    $"SQLite ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint. Ensure a UNIQUE index exists on the conflict target columns. SQLite error: {ex.Message}", ex);
+            }
+
+            scope?.SetRows(rows);
+
+            // OperationIndices for sqlite per-unit chunks are single element
+            foreach (var idx in chunk.OperationIndices)
+            {
+                counts[idx] = counts.TryGetValue(idx, out var existing) ? existing + rows : rows;
+            }
+        }
+        catch (Exception ex)
         {
-            counts[idx] = counts.TryGetValue(idx, out var existing) ? existing + rows : rows;
+            scope?.SetError(ex);
+            throw;
         }
     }
 }
