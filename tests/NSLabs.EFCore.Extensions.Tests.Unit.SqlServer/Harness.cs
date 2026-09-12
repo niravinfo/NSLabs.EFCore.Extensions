@@ -8,24 +8,40 @@ internal static class Harness
 {
     public static (string Sql, IReadOnlyList<SqlParam> Params) GenerateSingle(
         Action<IBulkBatch> build,
-        BulkExecuteOptions? options = null)
+        BulkExecuteOptions? options = null,
+        int? efCompatibilityLevel = null)
     {
-        var chunks = Generate(build, options);
+        var chunks = Generate(build, options, efCompatibilityLevel);
         Assert.True(chunks.Count == 1, $"Expected exactly 1 chunk but got {chunks.Count}.");
         return (Normalize(chunks[0].CommandText), chunks[0].Parameters);
     }
 
-    public static IReadOnlyList<SqlChunkPlan> Generate(Action<IBulkBatch> build, BulkExecuteOptions? options = null)
+    public static IReadOnlyList<SqlChunkPlan> Generate(
+        Action<IBulkBatch> build,
+        BulkExecuteOptions? options = null,
+        int? efCompatibilityLevel = null)
     {
-        var opts = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestDbContext>()
-            .UseSqlServer("Server=tcp:localhost,1433;Database=BulkExtensionsTest;User Id=test;Password=test;TrustServerCertificate=True;")
-            .Options;
-        using var context = new SqlServerUnitTestDbContext(opts);
+        var builder = new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<TestDbContext>()
+            .UseSqlServer(
+                "Server=tcp:localhost,1433;Database=BulkExtensionsTest;User Id=test;Password=test;TrustServerCertificate=True;",
+                b =>
+                {
+                    if (efCompatibilityLevel.HasValue)
+                    {
+                        b.UseCompatibilityLevel(efCompatibilityLevel.Value);
+                    }
+                });
+        using var context = new SqlServerUnitTestDbContext(builder.Options);
         var batch = new BulkBatch(context);
         build(batch);
-        return SqlServerSqlGenerator.Generate(
+
+        // Generate through the real provider path (EF compat inheritance),
+        // exactly as BulkBatch.ExecuteCoreAsync does in production.
+        var provider = new SqlServerProvider();
+        return provider.Generate(
             batch.Operations,
-            options?.MaxParametersPerCommand ?? BulkExecuteOptionsDefaults.MaxParametersPerCommand);
+            options?.MaxParametersPerCommand ?? BulkExecuteOptionsDefaults.MaxParametersPerCommand,
+            context);
     }
 
     public static string Normalize(string sql)

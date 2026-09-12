@@ -7,7 +7,7 @@ internal sealed class NpgsqlProvider : IBulkProvider
 {
     public string ProviderName => "Npgsql.EntityFrameworkCore.PostgreSQL";
 
-    public IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand)
+    public IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand, DbContext context)
         => NpgsqlSqlGenerator.Generate(operations, maxParametersPerCommand);
 
     public Task<Dictionary<int, int>> ExecuteAsync(
