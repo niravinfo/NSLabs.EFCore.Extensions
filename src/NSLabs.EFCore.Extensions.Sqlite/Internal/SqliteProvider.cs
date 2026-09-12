@@ -7,7 +7,7 @@ internal sealed class SqliteProvider : IBulkProvider
 {
     public string ProviderName => "Microsoft.EntityFrameworkCore.Sqlite";
 
-    public IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand)
+    public IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand, DbContext context)
         => SqliteSqlGenerator.Generate(operations, maxParametersPerCommand);
 
     public Task<Dictionary<int, int>> ExecuteAsync(

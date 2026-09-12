@@ -121,7 +121,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                 $"Provider '{providerName}' is not supported. Ensure the matching NSLabs.EFCore.Extensions.* provider package is referenced (e.g. NSLabs.EFCore.Extensions.SqlServer for SQL Server).");
         }
 
-        var chunks = provider.Generate(_operations, options.MaxParametersPerCommand);
+        var chunks = provider.Generate(_operations, options.MaxParametersPerCommand, _context);
 
         // Telemetry prelude — zero-cost when nobody listens. Policy is resolved only
         // when observed (active ActivityListener or debug-level logging); the whole

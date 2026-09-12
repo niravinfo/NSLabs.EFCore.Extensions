@@ -1,6 +1,10 @@
 # Plan: `Math.Min` / `Math.Max` (+ nested `Min(Round(...))`) in computed `SET` expressions
 
-Status: **plan only — no code changes yet, pending review**.
+Status: **implemented** — translator + 3 generators + EF-inherited compat level
++ golden-SQL and execution tests per §4. No `CASE WHEN` fallback (per-provider
+capability rule, `docs/DESIGN.md` §8). The library owns no compat knob: the SQL Server
+provider reads EF Core's configured `UseCompatibilityLevel` per `DbContext`
+(`SqlServerProvider.ResolveCompatibilityLevel`, engine-aware). See §2.3.
 Scope: `SET` value expressions (`Update.Set` / `SetProperty`, upsert `Update(...)`).
 Non-scope: `Where` / `UpdateWhen` predicates (verified: `Internal/LinqPredicateTranslator.cs`
 has zero `Math` handling today — a separate follow-up if wanted).
@@ -37,26 +41,32 @@ throws a provider-specific `NotSupportedException`. No silent rewrites with dive
    unchanged, so `MathF` rides along). Update both supported-lists (`:28`, `:158`).
 2. **Emission per provider** (`EmitMethod` in each generator — native or throw, never fallback):
    - Npgsql → `LEAST(a,b)` / `GREATEST(a,b)` (native, all versions, no gate).
-   - SQLite → `min(a,b)` / `max(a,b)` (scalar multi-arg form, all versions, no gate).
+    - SQLite → `MIN(a,b)` / `MAX(a,b)` (scalar multi-arg form, all versions, no gate;
+      uppercase per this repo's generator convention — SQLite names are case-insensitive).
    - SQL Server → `LEAST(a,b)` / `GREATEST(a,b)` **iff compat ≥ 160, else throw**
      provider-specific `NotSupportedException` (required: 160; how: set the option in §2.3 +
      `ALTER DATABASE <name> SET COMPATIBILITY_LEVEL = 160`). Explicitly **no `CASE WHEN`
      fallback** — mirrors EF Core (`GenerateLeast` returns null below 160; compat probing
      rejected in `dotnet/efcore#32528`): fail fast over silent semantic drift (`LEAST` ignores
      NULLs, `CASE WHEN` takes the `ELSE` branch; precedence/scale also differ).
-3. **Compat mechanism** (new — our library has no compat concept today; verified zero hits
-   outside test fakes):
-   - New `BulkExecuteOptions.SqlServerCompatibilityLevel` (default **150**, matching EF Core's
-     default). Flows through the existing per-`DbContext` channel (`UseBulkExecute(...)` →
-     `BulkExecuteOptionsExtension` copy-in snapshot) and per-call explicit options (full
-     replacement, existing contract). Tenant-safe (never a process-wide static).
-     Applies to SQL Server generation only; ignored by Npgsql/SQLite.
-   - `Clone`/`CopyTo`/`Validate` + `LogFragment`/`PopulateDebugInfo` updated alongside.
-   - Internal `IBulkProvider.Generate(operations, maxParametersPerCommand)` widened to carry the
-     level (internal interface: 3 providers + `BulkBatch` call site + fakes).
-   - Explicitly rejected: `DbConnection.ServerVersion` (engine version ≠ per-database compat),
-     runtime `sys.databases` query (sync generation path + per-tenant caching), process-wide
-     static (wrong for tenants).
+3. **Compat mechanism** (inherit, don't duplicate — decided after verification):
+    - No library-owned knob. `IBulkProvider.ResolveCompatibilityLevel(DbContext)` (default 150)
+      is overridden only by the SQL Server provider, which reads EF Core's configured
+      `SqlServerOptionsExtension` per `DbContext` (`UseCompatibilityLevel`, default **150**),
+      engine-aware (`SqlServer`/`AzureSql`/`AzureSynapse`). Tenant-safe (per-context config,
+      never a process-wide static). Applies to SQL Server generation only; Npgsql/SQLite use
+      the default and ignore it.
+    - Internal `IBulkProvider.Generate(operations, maxParametersPerCommand, sqlServerCompatibilityLevel)`
+      carries the resolved level (`BulkBatch` resolves via the provider, then generates).
+    - Single source of truth: a library knob could drift from EF's (EF 160 + ours forgotten at
+      150 → false throw; ours 160 vs DB 150 → runtime SQL error). A per-call compat override is
+      meaningless — compat is per-database, and EF's setting is already per-`DbContext`.
+    - Explicitly rejected: `DbConnection.ServerVersion` (engine version ≠ per-database compat),
+      runtime `sys.databases` query (sync generation path + per-tenant caching), process-wide
+      static (wrong for tenants) — same rejections as EF itself (`dotnet/efcore#32528`).
+    - Caveat: `SqlServerOptionsExtension` is `Infrastructure.Internal` (EF1001, may change in a
+      future EF major). Contained: only the SqlServer provider package touches it, and the EF
+      major is pinned centrally, so a rename can only arrive with a consciously adopted major.
 4. **No changes**: `SqlNodes`, `NormalizeComputedParameters`, `CountMethodArgs`,
    chunking/param budget.
 

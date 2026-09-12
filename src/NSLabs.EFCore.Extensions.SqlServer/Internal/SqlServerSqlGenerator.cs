@@ -9,10 +9,11 @@ internal static class SqlServerSqlGenerator
 
     private const string SourceAlias = "s";
 
-    public static IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand)
+    public static IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand, int sqlServerCompatibilityLevel = 150)
     {
         ArgumentNullException.ThrowIfNull(operations);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxParametersPerCommand, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(sqlServerCompatibilityLevel, 1);
 
         // SAFETY S8: presizing never changes chunk boundaries; only reduces reallocations
         var chunks = new List<SqlChunkPlan>(Math.Min(operations.Count, 16));
@@ -23,7 +24,7 @@ internal static class SqlServerSqlGenerator
         {
             if (operation.Kind == BulkOperationKind.Upsert)
             {
-                ExpandUpsert(operation, pending, chunks, maxParametersPerCommand, ref pendingParamCount);
+                ExpandUpsert(operation, pending, chunks, maxParametersPerCommand, sqlServerCompatibilityLevel, ref pendingParamCount);
                 continue;
             }
 
@@ -37,7 +38,7 @@ internal static class SqlServerSqlGenerator
 
             if (pendingParamCount + cost > maxParametersPerCommand && pending.Count > 0)
             {
-                chunks.Add(BuildChunk(pending));
+                chunks.Add(BuildChunk(pending, sqlServerCompatibilityLevel));
                 pending = [];
                 pendingParamCount = 0;
             }
@@ -48,7 +49,7 @@ internal static class SqlServerSqlGenerator
 
         if (pending.Count > 0)
         {
-            chunks.Add(BuildChunk(pending));
+            chunks.Add(BuildChunk(pending, sqlServerCompatibilityLevel));
         }
 
         return chunks;
@@ -64,6 +65,7 @@ internal static class SqlServerSqlGenerator
         List<PendingUnit> pending,
         List<SqlChunkPlan> chunks,
         int maxParametersPerCommand,
+        int sqlServerCompatibilityLevel,
         ref int pendingParamCount)
     {
         if (operation.UpsertSpec is not { } spec)
@@ -100,7 +102,7 @@ internal static class SqlServerSqlGenerator
 
             if (capacity <= 0)
             {
-                FlushPending(pending, chunks, ref pendingParamCount);
+                FlushPending(pending, chunks, sqlServerCompatibilityLevel, ref pendingParamCount);
                 continue;
             }
 
@@ -113,24 +115,24 @@ internal static class SqlServerSqlGenerator
             // fill), so flush now to keep chunk boundaries clean for subsequent operations.
             if (startRow < spec.Rows.Count)
             {
-                FlushPending(pending, chunks, ref pendingParamCount);
+                FlushPending(pending, chunks, sqlServerCompatibilityLevel, ref pendingParamCount);
             }
         }
     }
 
-    private static void FlushPending(List<PendingUnit> pending, List<SqlChunkPlan> chunks, ref int pendingParamCount)
+    private static void FlushPending(List<PendingUnit> pending, List<SqlChunkPlan> chunks, int sqlServerCompatibilityLevel, ref int pendingParamCount)
     {
         if (pending.Count == 0)
         {
             return;
         }
 
-        chunks.Add(BuildChunk(pending));
+        chunks.Add(BuildChunk(pending, sqlServerCompatibilityLevel));
         pending.Clear();
         pendingParamCount = 0;
     }
 
-    private static SqlChunkPlan BuildChunk(IReadOnlyList<PendingUnit> units)
+    private static SqlChunkPlan BuildChunk(IReadOnlyList<PendingUnit> units, int sqlServerCompatibilityLevel)
     {
         // SAFETY S2,S11: distinct indices computed once, order preserved (insertion order); SQL is identical
         var distinctIndices = GetDistinctIndices(units);
@@ -141,7 +143,7 @@ internal static class SqlServerSqlGenerator
             estimatedParamCount += u.Operation.Kind == BulkOperationKind.Upsert ? u.RowCount * 3 : 3;
         }
 
-        var emitter = new ParameterEmitter(Math.Max(estimatedParamCount, 4));
+        var emitter = new ParameterEmitter(Math.Max(estimatedParamCount, 4), sqlServerCompatibilityLevel);
         // EF Core pattern: StringBuilderCache (ThreadStatic pooling, max 1024) — reduces Gen0 per BuildChunk in hot loops
         var sql = StringBuilderCache.Acquire(256 + (units.Count * 180) + (distinctIndices.Count * 32));
 
@@ -451,13 +453,16 @@ internal static class SqlServerSqlGenerator
     {
         private readonly List<SqlParam> _parameters;
 
+        private readonly int _compatibilityLevel;
+
         public IReadOnlyList<SqlParam> Parameters => _parameters;
 
         private int Counter { get; set; }
 
-        public ParameterEmitter(int capacity = 8)
+        public ParameterEmitter(int capacity = 8, int compatibilityLevel = 150)
         {
             _parameters = new List<SqlParam>(capacity);
+            _compatibilityLevel = compatibilityLevel;
         }
 
         public string Emit(SqlNode node, IEntityType entityType, string? alias = null) => node switch
@@ -553,8 +558,25 @@ internal static class SqlServerSqlGenerator
                 case "FLOOR": return $"FLOOR({Emit(method.Args[0], entityType, alias)})";
                 case "ROUND" when method.Args.Count == 2: return $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
                 case "ROUND" when method.Args.Count == 3: return $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
+                case "LEAST" when method.Args.Count == 2: return EmitLeastGreatest(method, entityType, alias);
+                case "GREATEST" when method.Args.Count == 2: return EmitLeastGreatest(method, entityType, alias);
                 default: throw new NotSupportedException($"Method '{method.Method}' is not supported for SQL generation.");
             }
+        }
+
+        private string EmitLeastGreatest(SqlMethodCallNode method, IEntityType entityType, string? alias)
+        {
+            // LEAST/GREATEST require SQL Server 2022 (compatibility level 160+), mirroring EF Core.
+            // No CASE WHEN fallback: LEAST ignores NULLs while CASE WHEN takes the ELSE branch —
+            // fail fast instead of silently changing semantics.
+            if (_compatibilityLevel < 160)
+            {
+                throw new NotSupportedException(
+                    $"Method '{method.Method}' requires SQL Server compatibility level 160 (SQL Server 2022) or higher, but the configured level is {_compatibilityLevel}. " +
+                    $"Configure it via UseSqlServer(..., b => b.UseCompatibilityLevel(160)) and ensure the database allows it (ALTER DATABASE <name> SET COMPATIBILITY_LEVEL = 160).");
+            }
+
+            return $"{method.Method}({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
         }
 
         private string EmitLike(SqlLikeNode like, IEntityType entityType, string? alias)

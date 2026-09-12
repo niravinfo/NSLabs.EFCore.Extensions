@@ -79,7 +79,7 @@ await db.BulkExecuteAsync(b =>
 });
 ```
 
-Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`), conditionals (`? :`), coalesce (`??`), string methods (`ToUpper/ToLower/Trim/Substring/Replace/Concat`), `Math` (`Abs/Ceiling/Floor/Round/Truncate`) — same as EF Core `ExecuteUpdate`'s `SetProperty`.
+Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`), conditionals (`? :`), coalesce (`??`), string methods (`ToUpper/ToLower/Trim/Substring/Replace/Concat`), `Math` (`Abs/Ceiling/Floor/Round/Truncate/Min/Max`) — same as EF Core `ExecuteUpdate`'s `SetProperty`. `Math.Min`/`Math.Max` emit `LEAST`/`GREATEST` natively per provider (SQLite: `MIN`/`MAX`); on SQL Server they require compatibility level 160+ — inherited from EF Core's own `UseCompatibilityLevel` (default 150, no library knob) — and throw a `NotSupportedException` below it, never a silent `CASE WHEN` rewrite.
 
 ### Deferred builder
 
