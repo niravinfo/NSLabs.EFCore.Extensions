@@ -16,42 +16,40 @@ internal sealed class SqlServerProvider : IBulkProvider
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        // Single source of truth: inherit EF Core's configured compat level (UseCompatibilityLevel,
-        // default 150) instead of a library-owned knob that could drift from it. Never probe the
-        // server (DbConnection.ServerVersion, sys.databases): engine version != per-database compat,
-        // and EF itself rejected probing (dotnet/efcore#32528).
+        // Single source of truth: inherit EF Core's configured compat level (UseCompatibilityLevel)
+        // instead of a library-owned knob that could drift from it. EF supplies its own default
+        // per version — 150 on EF9/10, 160 on EF11 — including for the missing-config
+        // fallback below, so this file hardcodes no level.
+        // Never probe the server (DbConnection.ServerVersion, sys.databases): engine version
+        // != per-database compat, and EF itself rejected probing (dotnet/efcore#32528).
         // EF1001 note: SqlServerOptionsExtension lives in an Infrastructure.Internal namespace and
         // may change in a future EF major. That is contained: only this provider package touches it,
         // and the EF major is pinned centrally (Directory.Packages.props), so such a rename can only
         // arrive with a major we consciously adopt.
 #pragma warning disable EF1001
-        SqlServerOptionsExtension? extension;
         try
         {
-            extension = context.GetService<IDbContextOptions>()
+            var extension = context.GetService<IDbContextOptions>()
                 ?.FindExtension<SqlServerOptionsExtension>();
+            if (extension is null)
+            {
+                return SqlServerOptionsExtension.SqlServerDefaultCompatibilityLevel;
+            }
+
+            return extension.EngineType switch
+            {
+                SqlServerEngineType.AzureSql => extension.AzureSqlCompatibilityLevel,
+                SqlServerEngineType.AzureSynapse => extension.AzureSynapseCompatibilityLevel,
+                _ => extension.SqlServerCompatibilityLevel,
+            };
         }
         catch (InvalidOperationException)
         {
-            // No provider configured (or services not built): degrade to the EF default.
-            // Unreachable in production — BulkBatch resolves the provider by name first —
-            // but resolution must never fail the batch on missing config.
-            return 150;
+            // No provider configured (or services not built). Unreachable in production —
+            // BulkBatch resolves the provider by name first — but resolution must never
+            // fail the batch on missing config.
+            return SqlServerOptionsExtension.SqlServerDefaultCompatibilityLevel;
         }
-#pragma warning restore EF1001
-
-        if (extension is null)
-        {
-            return 150;
-        }
-
-#pragma warning disable EF1001
-        return extension.EngineType switch
-        {
-            SqlServerEngineType.AzureSql => extension.AzureSqlCompatibilityLevel,
-            SqlServerEngineType.AzureSynapse => extension.AzureSynapseCompatibilityLevel,
-            _ => extension.SqlServerCompatibilityLevel,
-        };
 #pragma warning restore EF1001
     }
 
