@@ -6,7 +6,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
 {
     public PredicateTranslationExecutionTests(SqlServerFixture fixture) : base(fixture) { }
 
-    [SkippableFact]
+    [Fact]
     public async Task Contains_updates_matching_rows()
     {
         RequireDatabase();
@@ -33,7 +33,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(0, dict[7003].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task StartsWith_updates_prefix_match()
     {
         RequireDatabase();
@@ -58,7 +58,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(0, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 7013)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task EndsWith_updates_suffix_match()
     {
         RequireDatabase();
@@ -82,7 +82,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(22, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 7021)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task In_collection_updates_matching_ids()
     {
         RequireDatabase();
@@ -109,7 +109,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(55, d[7033].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task NotIn_collection_excludes_matching_ids()
     {
         RequireDatabase();
@@ -135,7 +135,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(77, d[7042].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task IsNullOrEmpty_matches_null_and_empty()
     {
         RequireDatabase();
@@ -161,7 +161,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(0, d[7052].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Like_with_pattern_updates()
     {
         RequireDatabase();
@@ -187,7 +187,7 @@ public class PredicateTranslationExecutionTests : SqlServerTestBase
         Assert.Equal(0, d[7063].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Combined_predicate_with_contains_and_in()
     {
         RequireDatabase();

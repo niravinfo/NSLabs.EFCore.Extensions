@@ -1,0 +1,9 @@
+{
+  // .NET 10 SDK: opt in to the Microsoft.Testing.Platform-based `dotnet test`
+  // experience. Required by xUnit.net v3 4.x (MTP v2): the VSTest target is no
+  // longer supported when MTP v2 is referenced.
+  // https://xunit.net/docs/getting-started/v3/microsoft-testing-platform
+  "test": {
+    "runner": "Microsoft.Testing.Platform"
+  }
+}
