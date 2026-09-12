@@ -12,7 +12,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
 
     public string? UnavailableReason { get; private set; }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         try
         {
@@ -47,7 +47,7 @@ public sealed class SqlServerFixture : IAsyncLifetime
         return new IntegrationTestDbContext(options);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_container is not null)
         {

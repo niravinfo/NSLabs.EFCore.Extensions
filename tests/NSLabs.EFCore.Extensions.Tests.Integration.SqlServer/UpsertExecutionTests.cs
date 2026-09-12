@@ -4,7 +4,7 @@ namespace NSLabs.EFCore.Extensions.Tests.Integration.SqlServer;
 
 public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(fixture)
 {
-    [SkippableFact]
+    [Fact]
     public async Task Fresh_conflict_keys_take_the_insert_path()
     {
         RequireDatabase();
@@ -35,7 +35,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.False(inserted[1].Active);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Existing_conflict_keys_take_the_update_path()
     {
         RequireDatabase();
@@ -62,7 +62,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.False(reloaded.Active);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task One_merge_statement_handles_mixed_insert_and_update_paths()
     {
         RequireDatabase();
@@ -97,7 +97,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.Equal("BrandNew", inserted.Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Composite_conflict_target_matches_all_columns_before_updating()
     {
         RequireDatabase();
@@ -130,7 +130,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.Equal(7, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == 9702)).Key3);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Guard_blocks_matched_update_but_not_insert()
     {
         RequireDatabase();
@@ -170,7 +170,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.Equal("FreshRow", inserted.Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Explicit_set_constants_apply_on_match_only()
     {
         RequireDatabase();
@@ -199,7 +199,7 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
         Assert.Equal("Before", reloaded.Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_mixes_with_update_and_delete_in_one_round_trip()
     {
         RequireDatabase();

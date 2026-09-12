@@ -8,7 +8,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
     {
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Ambient_user_transaction_commit_persists()
     {
         RequireDatabase();
@@ -33,7 +33,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("committed", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Ambient_user_transaction_rollback_discards_batch()
     {
         RequireDatabase();
@@ -59,7 +59,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("start", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Enum_converter_roundtrips_through_predicate_and_set()
     {
         RequireDatabase();
@@ -85,7 +85,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal(OrderStatus.Shipped, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == orderNo)).Status);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Null_predicate_targets_only_null_rows()
     {
         RequireDatabase();
@@ -117,7 +117,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal(0, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == nonNullRowId)).Key3);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Tph_discriminator_scopes_updates_to_derived_type()
     {
         RequireDatabase();
@@ -146,7 +146,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("Beagle", dog.Breed);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Sequential_overlap_semantics_match_documented_behavior()
     {
         RequireDatabase();
@@ -181,7 +181,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         });
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task No_transaction_bulk_execute_persists_without_explicit_transaction()
     {
         RequireDatabase();
@@ -204,7 +204,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("after", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task User_transaction_mixed_bulk_and_savechanges_commit_atomic()
     {
         RequireDatabase();
@@ -234,7 +234,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.NotNull(await verify.Items.AsNoTracking().SingleOrDefaultAsync(x => x.Id == insertItemId));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task User_transaction_mixed_bulk_and_savechanges_rollback_discards_both()
     {
         RequireDatabase();
@@ -263,7 +263,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Null(await verify.Items.AsNoTracking().SingleOrDefaultAsync(x => x.Id == insertItemId));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Bulk_execute_multiple_operations_without_transaction_commits_per_statement()
     {
         RequireDatabase();
@@ -291,7 +291,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("B-upd", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idB)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Deferred_batch_without_transaction_persists()
     {
         RequireDatabase();
@@ -314,7 +314,7 @@ public class TransactionAndSemanticsTests : SqlServerTestBase
         Assert.Equal("batch-after", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Deferred_batch_inside_user_transaction_rollback_discards()
     {
         RequireDatabase();

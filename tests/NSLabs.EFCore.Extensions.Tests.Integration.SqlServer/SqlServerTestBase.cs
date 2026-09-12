@@ -1,6 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using Xunit;
-using Xunit.Sdk;
 
 namespace NSLabs.EFCore.Extensions.Tests.Integration.SqlServer;
 
@@ -13,7 +11,7 @@ public abstract class SqlServerTestBase(SqlServerFixture fixture)
     {
         if (Fixture.UnavailableReason is { } reason)
         {
-            Skip.If(true, reason);
+            Assert.Skip(reason);
         }
     }
 }

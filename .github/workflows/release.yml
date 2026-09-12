@@ -88,7 +88,8 @@ jobs:
 
       - name: Test (unit + integration)
         # Run tests before publishing. Integration tests use Testcontainers.MsSql.
-        run: dotnet test NSLabs.EFCore.Extensions.slnx --no-build --configuration Release -p:Version=${{ env.VERSION }} --logger "console;verbosity=minimal"
+        # MTP syntax is required (see global.json "test.runner").
+        run: dotnet test --solution NSLabs.EFCore.Extensions.slnx --no-build --configuration Release -p:Version=${{ env.VERSION }}
 
       - name: Pack
         run: |

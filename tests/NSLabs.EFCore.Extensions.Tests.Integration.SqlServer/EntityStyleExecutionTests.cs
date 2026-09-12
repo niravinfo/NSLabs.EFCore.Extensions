@@ -8,7 +8,7 @@ public class EntityStyleExecutionTests : SqlServerTestBase
     {
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Entity_rows_update_full_row_excluding_generated_columns()
     {
         RequireDatabase();
@@ -51,7 +51,7 @@ public class EntityStyleExecutionTests : SqlServerTestBase
         Assert.NotEqual(DateTime.MaxValue, reloaded.CreatedAt);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Custom_match_expression_matches_by_alternate_key_column()
     {
         RequireDatabase();

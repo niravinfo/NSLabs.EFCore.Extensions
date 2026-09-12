@@ -11,7 +11,7 @@ public sealed class NpgsqlFixture : IAsyncLifetime
 
     public string? UnavailableReason { get; private set; }
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         try
         {
@@ -44,7 +44,7 @@ public sealed class NpgsqlFixture : IAsyncLifetime
         return new NpgsqlTestDbContext(options);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_container is not null)
         {
