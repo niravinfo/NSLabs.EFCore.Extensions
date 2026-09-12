@@ -481,6 +481,8 @@ internal static class NpgsqlSqlGenerator
                     // SQL Server ROUND(x, digits, 1) means truncate; PG equivalent is TRUNC(x, digits).
                     // Third arg is the truncate-flag; ignore its value.
                     return $"TRUNC({EmitInner(method.Args[0], entityType, qualifyTarget)}, {EmitInner(method.Args[1], entityType, qualifyTarget)})";
+                case "LEAST" when method.Args.Count == 2: return $"LEAST({EmitInner(method.Args[0], entityType, qualifyTarget)}, {EmitInner(method.Args[1], entityType, qualifyTarget)})";
+                case "GREATEST" when method.Args.Count == 2: return $"GREATEST({EmitInner(method.Args[0], entityType, qualifyTarget)}, {EmitInner(method.Args[1], entityType, qualifyTarget)})";
                 default: throw new NotSupportedException($"Method '{method.Method}' is not supported for PostgreSQL generation.");
             }
         }

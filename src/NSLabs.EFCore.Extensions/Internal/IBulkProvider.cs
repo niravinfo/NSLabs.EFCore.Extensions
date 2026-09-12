@@ -6,7 +6,7 @@ internal interface IBulkProvider
 {
     string ProviderName { get; }
 
-    IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand);
+    IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand, DbContext context);
 
     Task<Dictionary<int, int>> ExecuteAsync(
         DbContext context,

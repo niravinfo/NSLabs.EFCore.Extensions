@@ -25,7 +25,7 @@ internal static class SetExpressionTranslator
             MethodCallExpression methodCall => TranslateMethodCall(methodCall, entityType, entityParameter),
             _ when !ReferencesEntity(node, entityParameter) => new SqlParameterNode(NormalizeParamValue(Evaluate(node))),
             _ => throw new NotSupportedException(
-                $"Computed SET expression node '{node.NodeType}' is not supported. Node: '{node}'. Supported: column references (x.Prop), captured variables, arithmetic (+, -, *, /, %), string concat (+), conditional (? :), coalesce (??), string methods (ToUpper, ToLower, Trim, Substring, Replace, Concat), Math (Abs, Ceiling, Floor, Round), and numeric conversions.")
+                $"Computed SET expression node '{node.NodeType}' is not supported. Node: '{node}'. Supported: column references (x.Prop), captured variables, arithmetic (+, -, *, /, %), string concat (+), conditional (? :), coalesce (??), string methods (ToUpper, ToLower, Trim, Substring, Replace, Concat), Math (Abs, Ceiling, Floor, Round, Min, Max), and numeric conversions.")
         };
 
     private static SqlNode TranslateMember(MemberExpression member, IEntityType entityType, ParameterExpression entityParameter)
@@ -151,11 +151,15 @@ internal static class SetExpressionTranslator
                     return new SqlMethodCallNode("ROUND", [TranslateNode(call.Arguments[0], entityType, entityParameter), TranslateNode(call.Arguments[1], entityType, entityParameter)]);
                 case "Truncate" when call.Arguments.Count == 1:
                     return new SqlMethodCallNode("ROUND", [TranslateNode(call.Arguments[0], entityType, entityParameter), new SqlParameterNode(0), new SqlParameterNode(1)]);
+                case "Min" when call.Arguments.Count == 2:
+                    return new SqlMethodCallNode("LEAST", [TranslateNode(call.Arguments[0], entityType, entityParameter), TranslateNode(call.Arguments[1], entityType, entityParameter)]);
+                case "Max" when call.Arguments.Count == 2:
+                    return new SqlMethodCallNode("GREATEST", [TranslateNode(call.Arguments[0], entityType, entityParameter), TranslateNode(call.Arguments[1], entityType, entityParameter)]);
             }
         }
 
         throw new NotSupportedException(
-            $"Method '{call.Method.DeclaringType?.Name}.{call.Method.Name}' is not supported in computed SET expressions. Supported: string.ToUpper, ToLower, Trim, TrimStart, TrimEnd, Substring, Replace, Concat, Math.Abs, Ceiling, Floor, Round, Truncate, and x.Prop.Length.");
+            $"Method '{call.Method.DeclaringType?.Name}.{call.Method.Name}' is not supported in computed SET expressions. Supported: string.ToUpper, ToLower, Trim, TrimStart, TrimEnd, Substring, Replace, Concat, Math.Abs, Ceiling, Floor, Round, Truncate, Min, Max, and x.Prop.Length.");
     }
 
     private static SqlNode AddOne(SqlNode node)

@@ -455,6 +455,8 @@ internal static class SqliteSqlGenerator
                     // SQLite has no 3-arg ROUND for truncate; emulate via CAST truncation
                     // ROUND(x,0,1) in SQL Server means truncate; we emit CAST(x AS INTEGER)
                     return $"CAST({Emit(method.Args[0], entityType, alias)} AS INTEGER)";
+                case "LEAST" when method.Args.Count == 2: return $"MIN({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
+                case "GREATEST" when method.Args.Count == 2: return $"MAX({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
                 default: throw new NotSupportedException($"Method '{method.Method}' is not supported for SQLite generation.");
             }
         }
