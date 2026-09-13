@@ -172,8 +172,8 @@ implementation whether `BulkExecuteTelemetryNames` absorbs it.)
 |---|---|---|---|---|
 | 60000 | `BulkExecuteStarting` | Debug | Batch validated, chunks planned, before first round-trip | OperationCount, UpdateCount, UpsertCount, DeleteCount, ChunkCount, Provider, Database |
 | 60001 | `BulkExecuteExecuted` | Information | Batch completed | OperationCount, TotalRows, ElapsedMs, ChunkCount, Provider, Database |
-| 60002 | `BulkChunkExecuting` | Debug | Before each chunk command | ChunkIndex, ChunkCount, OperationCount, ParameterCount (+ SQL text iff policy C.4 allows) |
-| 60003 | `BulkChunkExecuted` | Debug | After each chunk | ChunkIndex, RowsAffected, ElapsedMs |
+| 60002 | `BulkChunkExecuting` | Information | Before each chunk command | ChunkIndex, OperationCount, ParameterCount, CommandText (always, placeholders-only) |
+| 60003 | `BulkChunkExecuted` | Information | After each chunk | ChunkIndex, RowsAffected, ElapsedMs |
 | 60004 | `BulkExecuteFailed` | Error | Exception escapes (incl. `BulkZeroRowsAffectedException`); exception passed as such | OperationCount, Provider + `Exception` |
 | 60005 | `BulkExecuteRetrying` | Warning | Execution-strategy retry attempt (EF parity: `ExecutionStrategyRetrying` is Warning) | Attempt, ElapsedMs, exception message (no values) |
 
@@ -187,51 +187,39 @@ Notes:
 - Elapsed time via a single `Stopwatch` started in `ExecuteCoreAsync` (batch) and
   per-chunk measurements around each command execution.
 
-### C.4 Sensitive-data policy (single rule for logs; shared with traces)
+### C.4 Sensitive-data policy (EF parity: SQL always, values never)
 
-```csharp
-public enum BulkCommandTextLogging { Never, WhenSensitiveLoggingEnabled, Always }
-```
+EF Core logs SQL command text unconditionally at Information (placeholders only);
+`EnableSensitiveDataLogging()` adds parameter *values*. Our generators emit
+placeholders-only SQL by construction (all values travel in the separate `SqlParam`
+list, never interpolated — see `DESIGN.md` §2), so the same rule applies with no
+per-call flag check:
 
-| Content | Default | Override path |
-|---|---|---|
-| Counts, table/entity names, provider, db name, durations, chunk shapes | Always logged | — |
-| SQL command text | Only if `EnableSensitiveDataLogging()` **or** explicit `Always` (read via `CoreOptionsExtension.IsSensitiveDataLoggingEnabled`, null-tolerant → default closed) | `BulkLoggingOptions.CommandTextLogging` (see C.5) |
-| Parameter values | **Never**, even with sensitive logging (C.1.3) | None — deliberate |
+| Content | Rule |
+|---|---|
+| Counts, table/entity names, provider, db name, durations, chunk shapes | Always logged |
+| SQL command text (`chunk.CommandText`: placeholders, zero values possible) | Always logged |
+| Parameter values | **Never**, even with sensitive logging (C.1.3) — no values parameter exists on any log method |
 
-`MaxCommandLength` truncation (existing helper `BulkExecuteTelemetry.Truncate`) applies
-identically; log a `CommandTruncated=true` property when truncated. Long-term, route the
-telemetry `CaptureCommandText` flag through the same enum for one policy (keep the bool
-working as `Never`/`Always` mapping for back-compat).
+`MaxCommandLength` truncation (existing helper `BulkExecuteTelemetry.Truncate`, fixed
+`4000` matching the instrumentation default) applies identically; log a
+`CommandTruncated=true` property when truncated. Telemetry `CaptureCommandText` stays
+separate and unchanged. There is deliberately **no** `ShouldLogCommandText` helper
+and no `CoreOptionsExtension` read anywhere in the logging path.
 
-### C.5 Configuration surface
+### C.5 Configuration surface (no new API — follow EF)
 
 Logging is **ambient, not per-call**: no parameters on `BulkExecuteOptions`, no arguments
-on `ExecuteAsync`. Rationale: EF configures logging on the context (`LogTo`,
-`ConfigureWarnings`), never per `SaveChanges`; per-call knobs would fight MEL filters
-and complicate the hot path. One small options object covers the only thing MEL cannot
-express — the SQL-text override:
+on `ExecuteAsync`, and no `UseBulkLogging` extension. Rationale: EF configures logging
+on the context (`LogTo`, `UseLoggerFactory`, `EnableSensitiveDataLogging()`,
+`ConfigureWarnings`), never per `SaveChanges`; a library-specific knob would fight MEL
+filters, add a second source of truth for privacy, and complicate the hot path.
 
-```csharp
-public sealed class BulkLoggingOptions
-{
-    public BulkCommandTextLogging CommandTextLogging { get; set; } = BulkCommandTextLogging.WhenSensitiveLoggingEnabled;
-    public int MaxCommandLength { get; set; } = 4000; // shared default with instrumentation
-    public void Validate() { ... }
-}
-
-// DbContext setup, next to UseBulkExecute(...):
-optionsBuilder.UseBulkLogging(o => o.CommandTextLogging = BulkCommandTextLogging.Always);
-```
-
-- `UseBulkLogging` stores a **copy-in, validated snapshot** in a
-  `BulkLoggingOptionsExtension : IDbContextOptionsExtension` (same hardened pattern as
-  `BulkExecuteOptionsExtension`: constant service-provider hash, no `ApplyServices`
-  registrations), extends `LogFragment`/`PopulateDebugInfo`, resolved at execution time
-  via `FindExtension` with `new BulkLoggingOptions()` fallback.
-- If the team prefers *zero* new API: Phase 1 can ship with the enum hardwired to
-  `WhenSensitiveLoggingEnabled` and add the options object later — the plan supports both,
-  decision recorded in §E.
+- Basic logs (counts, durations, errors): work with whatever logging the app already
+  configured. Nothing to add next to `UseBulkExecute(...)`.
+- SQL text: gated solely by EF's `EnableSensitiveDataLogging()`. Off by default,
+  on when the user opts in — same rule as EF's own `Database.Command` logs.
+- No new `IDbContextOptionsExtension`, no `LogFragment`/`PopulateDebugInfo` changes.
 
 ### C.6 Implementation sketch
 
@@ -243,25 +231,27 @@ New/changed files (all under `src/NSLabs.EFCore.Extensions/`):
 3. `Diagnostics/BulkExecuteLoggingDefinitions.cs` — `internal static partial class` with
    one `[LoggerMessage(EventId = ..., Level = ..., Message = "...")] partial` method per
    catalog row (max ~6 params each to stay in the generator's fast path).
-4. `BulkBatch.ExecuteCoreAsync` — resolve `ILogger` + logging options once (after the
+4. `BulkBatch.ExecuteCoreAsync` — resolve `ILogger` once (after the
    empty-batch early-out, before chunk generation); `Stopwatch` for batch; emit
-   60000 → (per chunk: 60002 → execute → 60003) → 60001 / catch → 60004 (+ 60005 at the
-   retry site, wherever the execution strategy wraps). Guard every call with
-   `logger.IsEnabled(...)`; evaluate SQL text / sensitive args only inside the guard.
-5. `Diagnostics/BulkExecuteLogging.cs` (new, internal) — helpers: `ShouldLogCommandText
-   (DbContext, BulkLoggingOptions)` (reads `CoreOptionsExtension`, null-tolerant),
-   `BeginBatchScope(ILogger, batchId, provider, operationCount, activity)` returning a
-   null-safe disposable that also stamps `TraceId`/`SpanId` from `Activity.Current`
-   when present (log↔trace correlation for free).
-6. `DependencyInjection/BulkLoggingOptionsExtension.cs` + `UseBulkLogging` builder
-   extension (only if C.5 options approved; else skip).
+   60000 → 60001 / catch → 60004. Guard every call with
+   `bulkLogger.IsEnabled(...)`; all argument building stays inside the guards.
+5. Executors (`SqlServer/Sqlite/NpgsqlExecutor.RunAsync`) — resolve the bulk logger
+   once via `BulkExecuteLogging.ResolveBulkLogger(context)` (level-agnostic: null
+   means "no factory", never "disabled"); thread `TelemetryContext?` + `ILogger?
+   bulkLogger` through `ExecuteCoreAsync` → `ExecuteChunkAsync` (`CancellationToken`
+   last). Each chunk event checks its own level (`isChunkLoggingEnabled`) with a
+   per-chunk `Stopwatch`; SQL text passes through unconditionally (C.4).
+6. `Diagnostics/BulkExecuteLogging.cs` (internal) — `ResolveBulkLogger(DbContext)`;
+   future home of `BeginBatchScope(ILogger, batchId, provider, operationCount,
+   activity)` stamping `TraceId`/`SpanId` from `Activity.Current` when present
+   (log↔trace correlation, Phase 2 remainder).
 7. Tests (`tests/...Unit.Shared` or per-provider unit suites): in-memory
    `ILoggerProvider` harness asserting — catalog IDs/levels/category; completion at
-   Information; SQL absent by default, present with `Always` and with
-   `EnableSensitiveDataLogging()`; values never present; no-throw when no factory;
-   truncation flag. Mirror the existing `SqliteTelemetryTests` style (opt-out
-   collection, `BulkInstrumentation.Reset()`-like isolation if process-wide state added —
-   avoid adding any).
+   Information; chunk events at Information with SQL text always present
+   (placeholders-only); values never present; no-throw when no factory;
+   truncation flag; Warning/Error-only minimum hides Information chunk events.
+   Mirror the existing `SqliteTelemetryTests` style (shared non-parallel
+   collection so parallel telemetry listeners can't cross-capture spans).
 8. Docs: README "Logging" section (`LogTo` filter-by-category example, sensitive-data
    rule, event table pointer), XML docs on all new public API, release-notes entry for
    the 1001/1002/1101 → 60000/60001/60004 rename.
@@ -279,7 +269,7 @@ are the signal there).
   (`ILoggingBuilder.AddOpenTelemetry()`, same `OpenTelemetry.Extensions.Hosting`
   package the samples already use) — no `OpenTelemetry.*` reference from `src`,
   preserving the inbox-only posture.
-- The `TraceId`/`SpanId` scope properties (C.6.5) make log records joinable to our
+- The `TraceId`/`SpanId` scope properties (C.6) make log records joinable to our
   `BulkExecute` spans in any backend.
 
 ---
@@ -288,10 +278,9 @@ are the signal there).
 
 | Phase | Scope | Acceptance |
 |---|---|---|
-| 1 — Core events | Category + EventIds + `[LoggerMessage]` definitions; wire 60000/60001/60004 + `Stopwatch` into `ExecuteCoreAsync`; hardwire text policy to `WhenSensitiveLoggingEnabled` | Unit tests: IDs/levels/category, Info completion, Error with exception, no-throw unconfigured |
-| 2 — Detail | 60002/60003 per-chunk + SQL text under policy, truncation flag; 60005 at retry site; batch scope with trace correlation | Golden-log tests incl. policy matrix (Never / sensitive-on / Always), truncation |
-| 3 — Options & surface | `BulkLoggingOptions` + `UseBulkLogging` + options-extension (`LogFragment`/`PopulateDebugInfo`); unify telemetry text policy behind the shared helper | Back-compat tests for `CaptureCommandText` mapping; debug-info tests |
-| 4 — Docs & samples | README section, XML docs, release note; extend one sample (Sqlite + `NSLABS_OTEL_CONSOLE`) to show logs flowing to console/OTel | Sample run output reviewed; docs build clean |
+| 1 — Core events | Category + EventIds + `[LoggerMessage]` definitions; wire 60000/60001/60004 + `Stopwatch` into `ExecuteCoreAsync` | Unit tests: IDs/levels/category, Info completion, Error with exception, no-throw unconfigured |
+| 2 — Detail | 60002/60003 per-chunk at Information with unconditional placeholders-only SQL; level-agnostic `ResolveBulkLogger` + per-site `IsEnabled`; `TelemetryContext` threading (`CancellationToken` last); truncation flag; 60005 at retry site; batch scope with trace correlation | Golden-log tests: SQL always present, values never, Warning-minimum hides Info events, truncation |
+| 3 — Docs & samples | README section, XML docs, release note; extend one sample (Sqlite + `NSLABS_OTEL_CONSOLE`) to show logs flowing to console/OTel | Sample run output reviewed; docs build clean |
 
 ---
 
@@ -299,7 +288,6 @@ are the signal there).
 
 1. **Category string**: `NSLabs.EFCore.Extensions` (recommended, = ActivitySource name) vs.
    something hierarchical like `NSLabs.EFCore.Extensions.BulkExecute`?
-2. **Options in Phase 1**: ship `BulkLoggingOptions`/`UseBulkLogging` immediately, or
-   hardwire `WhenSensitiveLoggingEnabled` and add the override only on demand?
-3. **Parameter values**: confirm the never-log rule (C.1.3), or align fully with EF and
-   log values when sensitive logging is on?
+2. **Parameter values**: settled: never-log (only deviation from EF). SQL text needs
+   no flag read at all — placeholders-only by construction (C.4). No `UseBulkLogging`
+   override (C.5).

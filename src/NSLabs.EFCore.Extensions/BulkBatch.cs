@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -123,9 +124,11 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
         var chunks = provider.Generate(_operations, options.MaxParametersPerCommand, _context);
 
-        // Telemetry prelude — zero-cost when nobody listens. Policy is resolved only
-        // when observed (active ActivityListener or debug-level logging); the whole
-        // block is defensive so telemetry can never fail the batch.
+        // Observability prelude — zero-cost when nobody listens.
+        // Logger is resolved once from the context's ILoggerFactory (ambient, zero-config:
+        // LogTo / AddDbContext factory apply automatically; no-op when unconfigured).
+        // Instrumentation policy is resolved only when tracing (active ActivityListener).
+        // The whole block is defensive so observability can never fail the batch.
         ILogger? logger = null;
         BulkInstrumentationOptions? instrumentation = null;
         var tracing = false;
@@ -133,7 +136,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         {
             try
             {
-                logger = _context.GetService<ILoggerFactory>()?.CreateLogger(typeof(BulkBatch));
+                logger = _context.GetService<ILoggerFactory>()?.CreateLogger(BulkLoggerCategory.Name);
             }
             catch
             {
@@ -141,7 +144,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             }
 
             tracing = BulkExecuteTelemetry.Source.HasListeners();
-            if (tracing || logger?.IsEnabled(LogLevel.Debug) == true)
+            if (tracing)
             {
                 instrumentation = ResolveInstrumentationEffective();
             }
@@ -153,14 +156,63 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
             tracing = false;
         }
 
-        if (logger?.IsEnabled(LogLevel.Debug) == true)
+        // Hoisted IsEnabled checks: each is one virtual call, evaluated once per batch.
+        // All argument building below is inside these guards — no counting, no
+        // database-name lookup, no Stopwatch when disabled.
+        var isDebugEnabled = logger?.IsEnabled(LogLevel.Debug) == true;
+        var isInformationEnabled = logger?.IsEnabled(LogLevel.Information) == true;
+
+        string? databaseName = null;
+        int updateCount = 0;
+        int upsertCount = 0;
+        int deleteCount = 0;
+        Stopwatch? stopwatch = null;
+
+        if (isDebugEnabled || isInformationEnabled)
         {
-            logger.LogDebug(
-                new EventId(1001, "BulkExecuteStart"),
-                "BulkExecute start: {OperationCount} operation(s) in {ChunkCount} chunk(s) on {Provider}.",
+            try
+            {
+                var name = _context.Database.GetDbConnection().Database;
+                if (!string.IsNullOrEmpty(name))
+                {
+                    databaseName = name;
+                }
+            }
+            catch
+            {
+                databaseName = null;
+            }
+        }
+
+        if (isDebugEnabled)
+        {
+            // EF Core pattern: manual loop vs LINQ Count+Where — no allocations.
+            for (var i = 0; i < _operations.Count; i++)
+            {
+                switch (_operations[i].Kind)
+                {
+                    case BulkOperationKind.Update: updateCount++; break;
+                    case BulkOperationKind.Upsert: upsertCount++; break;
+                    case BulkOperationKind.Delete: deleteCount++; break;
+                }
+            }
+
+            BulkExecuteLoggingDefinitions.BulkExecuteStarting(
+                logger!,
                 _operations.Count,
+                updateCount,
+                upsertCount,
+                deleteCount,
                 chunks.Count,
-                providerName);
+                providerName,
+                databaseName);
+        }
+
+        // Elapsed time is only needed for the Information completion event.
+        // No Stopwatch allocation when completion logging is off.
+        if (isInformationEnabled)
+        {
+            stopwatch = Stopwatch.StartNew();
         }
 
         using var batchScope = BulkExecuteTelemetry.StartBatchScope(
@@ -183,13 +235,16 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
             batchScope?.SetTotalRows(total);
 
-            if (logger?.IsEnabled(LogLevel.Debug) == true)
+            if (isInformationEnabled)
             {
-                logger.LogDebug(
-                    new EventId(1002, "BulkExecuteCompleted"),
-                    "BulkExecute completed: {TotalRows} row(s) across {OperationCount} operation(s).",
+                BulkExecuteLoggingDefinitions.BulkExecuteExecuted(
+                    logger!,
+                    _operations.Count,
                     total,
-                    _operations.Count);
+                    stopwatch?.ElapsedMilliseconds ?? 0,
+                    chunks.Count,
+                    providerName,
+                    databaseName);
             }
 
             return new BulkExecuteResult
@@ -204,10 +259,9 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
             if (logger?.IsEnabled(LogLevel.Error) == true)
             {
-                logger.LogError(
-                    new EventId(1101, "BulkExecuteFailed"),
+                BulkExecuteLoggingDefinitions.BulkExecuteFailed(
+                    logger!,
                     ex,
-                    "BulkExecute failed after {OperationCount} operation(s) on {Provider}.",
                     _operations.Count,
                     providerName);
             }
