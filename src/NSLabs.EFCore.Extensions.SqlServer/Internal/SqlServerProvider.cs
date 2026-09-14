@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.SqlServer.Infrastructure.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -58,8 +59,9 @@ internal sealed class SqlServerProvider : IBulkProvider
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         CancellationToken cancellationToken)
-        => SqlServerExecutor.ExecuteAsync(context, chunks, operations, options, cancellationToken);
+        => SqlServerExecutor.ExecuteAsync(context, chunks, operations, options, logger, cancellationToken);
 }
 
 internal static class SqlServerProviderRegistration

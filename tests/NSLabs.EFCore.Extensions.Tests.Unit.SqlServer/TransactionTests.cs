@@ -58,7 +58,7 @@ public class TransactionTests
         var (connection, chunks, counts) = ArrangeTwoOps();
         ScriptRowCounts(connection, [1], [1]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction: null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction: null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.All(connection.ExecutedCommands, cmd => Assert.Null(((FakeAdo.Command)cmd).GetType().GetProperty("DbTransaction", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance) is null ? null : null));
@@ -80,7 +80,7 @@ public class TransactionTests
         ScriptRowCounts(connection, [1], [1]);
         var transaction = new FakeAdo.Transaction(connection, IsolationLevel.ReadCommitted);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.Equal(transaction, connection.ExecutedCommands[0].Transaction);
@@ -113,7 +113,7 @@ public class TransactionTests
         var counts = new Dictionary<int, int>();
         ScriptRowCounts(connection, [2], [0]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, counts[0]);
         Assert.Equal(0, counts[1]);
@@ -135,7 +135,7 @@ public class TransactionTests
 
         ScriptRowCounts(connection, [3], [4], [1]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(7, counts[0]); // 3 + 4 accumulated
         Assert.Equal(1, counts[1]);
@@ -158,7 +158,7 @@ public class TransactionTests
 
         ScriptRowCounts(connection, [2], [5]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(7, counts[0]);
         Assert.Equal(tx, connection.ExecutedCommands[0].Transaction);
@@ -171,7 +171,7 @@ public class TransactionTests
         var (connection, chunks, counts) = ArrangeTwoOps();
         ScriptRowCounts(connection, [1], [1]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.Equal(chunks[0].CommandText, connection.ExecutedCommands[0].CommandText);
@@ -185,7 +185,7 @@ public class TransactionTests
         ScriptRowCounts(connection, [1], [1]);
         var tx = new FakeAdo.Transaction(connection, IsolationLevel.ReadCommitted);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, tx, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
     }
@@ -205,7 +205,7 @@ public class TransactionTests
         var counts = new Dictionary<int, int>();
         ScriptRowCounts(connection, [0], [0]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(0, counts[0]);
         Assert.Equal(0, counts[1]);

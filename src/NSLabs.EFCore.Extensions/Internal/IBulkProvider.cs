@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -13,5 +14,6 @@ internal interface IBulkProvider
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         CancellationToken cancellationToken);
 }

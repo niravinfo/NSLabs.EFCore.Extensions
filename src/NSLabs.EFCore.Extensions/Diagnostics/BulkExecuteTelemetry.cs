@@ -14,6 +14,10 @@ internal static class BulkExecuteTelemetry
 {
     internal static readonly ActivitySource Source = new(BulkExecuteTelemetryNames.SourceName, GetVersion());
 
+    // Fallback when callers pass null telemetry while a listener is active.
+    // Read-only: never mutate or expose — shared across all batches/chunks.
+    private static readonly BulkInstrumentationOptions s_defaultInstrumentation = new();
+
     private static string GetVersion()
     {
         try
@@ -76,7 +80,7 @@ internal static class BulkExecuteTelemetry
                 return null;
             }
 
-            var instr = instrumentation ?? new BulkInstrumentationOptions();
+            var instr = instrumentation ?? s_defaultInstrumentation;
 
             var dbSystem = DbSystem(providerName);
             if (dbSystem is not null)
@@ -142,18 +146,16 @@ internal static class BulkExecuteTelemetry
     internal static ChunkScope? StartChunkScope(
         SqlChunkPlan chunk,
         int chunkIndex,
-        BulkInstrumentationOptions? instrumentation,
-        string? dbSystem,
-        string? dbName)
+        TelemetryContext? telemetry)
     {
         // Check-then-allocate: no listener means zero overhead — return before
-        // allocating the fallback options when the caller passed null.
+        // touching the fallback options when the caller passed null.
         if (!Source.HasListeners())
         {
             return null;
         }
 
-        var instr = instrumentation ?? new BulkInstrumentationOptions();
+        var instr = telemetry?.Instrumentation ?? s_defaultInstrumentation;
         if (!instr.EnableChunkSpans)
         {
             return null;
@@ -167,14 +169,14 @@ internal static class BulkExecuteTelemetry
                 return null;
             }
 
-            if (dbSystem is not null)
+            if (telemetry?.DbSystem is not null)
             {
-                activity.SetTag("db.system", dbSystem);
+                activity.SetTag("db.system", telemetry.DbSystem);
             }
 
-            if (!string.IsNullOrEmpty(dbName))
+            if (!string.IsNullOrEmpty(telemetry?.DbName))
             {
-                activity.SetTag("db.name", dbName);
+                activity.SetTag("db.name", telemetry.DbName);
             }
 
             activity.SetTag("db.operation", "bulk_execute");
