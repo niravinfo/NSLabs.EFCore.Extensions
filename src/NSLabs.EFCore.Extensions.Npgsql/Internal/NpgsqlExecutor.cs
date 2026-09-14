@@ -1,6 +1,8 @@
 using System.Data;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
+using Microsoft.Extensions.Logging;
 using NSLabs.EFCore.Extensions.Diagnostics;
 
 namespace NSLabs.EFCore.Extensions.Internal;
@@ -12,13 +14,14 @@ internal static class NpgsqlExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         CancellationToken cancellationToken)
     {
         var database = context.Database;
 
         if (database.CurrentTransaction is not null)
         {
-            return RunAsync(context, chunks, operations, options, closeConnection: false, cancellationToken);
+            return RunAsync(context, chunks, operations, options, logger, closeConnection: false, cancellationToken);
         }
 
         var strategy = database.CreateExecutionStrategy();
@@ -34,11 +37,11 @@ internal static class NpgsqlExecutor
                     }
 
                     attempt++;
-                    return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+                    return RunAsync(context, chunks, operations, options, logger, closeConnection: true, cancellationToken);
                 });
         }
 
-        return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+        return RunAsync(context, chunks, operations, options, logger, closeConnection: true, cancellationToken);
     }
 
     private static async Task<Dictionary<int, int>> RunAsync(
@@ -46,6 +49,7 @@ internal static class NpgsqlExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         bool closeConnection,
         CancellationToken cancellationToken)
     {
@@ -59,30 +63,9 @@ internal static class NpgsqlExecutor
         var transaction = database.CurrentTransaction?.GetDbTransaction();
         var shouldCloseConnection = false;
 
-        // Chunk telemetry context — resolved only when observed (active
-        // ActivityListener). Null means defaults; StartChunkScope re-checks.
-        BulkInstrumentationOptions? instrumentation = null;
-        string? dbSystem = null;
-        string? dbName = null;
-        if (BulkExecuteTelemetry.Source.HasListeners())
-        {
-            try
-            {
-                instrumentation = BulkBatch.ResolveInstrumentationEffective();
-                dbSystem = BulkExecuteTelemetry.DbSystem(context.Database.ProviderName);
-                dbName = connection.Database;
-                if (string.IsNullOrEmpty(dbName))
-                {
-                    dbName = null;
-                }
-            }
-            catch
-            {
-                instrumentation = null;
-                dbSystem = null;
-                dbName = null;
-            }
-        }
+        // Telemetry context — null when not observed (active ActivityListener required).
+        // Null means defaults; StartChunkScope re-checks.
+        var telemetryContext = TelemetryContext.Resolve(context, connection);
 
         try
         {
@@ -92,7 +75,7 @@ internal static class NpgsqlExecutor
                 shouldCloseConnection = true;
             }
 
-            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken, instrumentation, dbSystem, dbName).ConfigureAwait(false);
+            await ExecuteCoreAsync(connection, transaction, chunks, counts, options, telemetryContext, logger, cancellationToken).ConfigureAwait(false);
 
             if (options.ThrowIfZeroAffected)
             {
@@ -118,14 +101,13 @@ internal static class NpgsqlExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken,
-        BulkInstrumentationOptions? instrumentation = null,
-        string? dbSystem = null,
-        string? dbName = null)
+        TelemetryContext? telemetryContext = null,
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         for (var i = 0; i < chunks.Count; i++)
         {
-            await ExecuteChunkAsync(connection, chunks[i], transaction, counts, options, cancellationToken, i, instrumentation, dbSystem, dbName).ConfigureAwait(false);
+            await ExecuteChunkAsync(connection, chunks[i], transaction, counts, options, i, telemetryContext, logger, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -135,11 +117,10 @@ internal static class NpgsqlExecutor
         System.Data.Common.DbTransaction? transaction,
         Dictionary<int, int> counts,
         BulkExecuteOptions options,
-        CancellationToken cancellationToken,
         int chunkIndex = 0,
-        BulkInstrumentationOptions? instrumentation = null,
-        string? dbSystem = null,
-        string? dbName = null)
+        TelemetryContext? telemetryContext = null,
+        ILogger? logger = null,
+        CancellationToken cancellationToken = default)
     {
         // Zero-row upsert no-op
         if (chunk.Parameters.Count == 0 && chunk.CommandText.StartsWith("-- zero-row", StringComparison.Ordinal))
@@ -149,9 +130,20 @@ internal static class NpgsqlExecutor
             return;
         }
 
-        using var scope = BulkExecuteTelemetry.StartChunkScope(chunk, chunkIndex, instrumentation, dbSystem, dbName);
+        using var scope = BulkExecuteTelemetry.StartChunkScope(chunk, chunkIndex, telemetryContext);
+
+        var isChunkLoggingEnabled = logger?.IsEnabled(LogLevel.Information) == true;
+        Stopwatch? chunkStopwatch = null;
+
         try
         {
+            if (isChunkLoggingEnabled)
+            {
+                BulkExecuteLoggingDefinitions.BulkChunkExecuting(
+                    logger!, chunkIndex, chunk.OperationIndices.Count, chunk.Parameters.Count, chunk.CommandText);
+                chunkStopwatch = Stopwatch.StartNew();
+            }
+
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = chunk.CommandText;
@@ -183,6 +175,11 @@ internal static class NpgsqlExecutor
             foreach (var idx in chunk.OperationIndices)
             {
                 counts[idx] = counts.TryGetValue(idx, out var existing) ? existing + rows : rows;
+            }
+
+            if (isChunkLoggingEnabled)
+            {
+                BulkExecuteLoggingDefinitions.BulkChunkExecuted(logger!, chunkIndex, rows, chunkStopwatch!.ElapsedMilliseconds);
             }
         }
         catch (Exception ex)

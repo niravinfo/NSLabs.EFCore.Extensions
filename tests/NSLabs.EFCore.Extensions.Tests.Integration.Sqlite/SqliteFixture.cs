@@ -8,7 +8,7 @@ public sealed class SqliteFixture : IAsyncLifetime
     private SqliteConnection? _keepAlive;
     public string ConnectionString { get; } = "DataSource=file:nsbulk_sqlite_tests?mode=memory&cache=shared";
 
-    public async Task InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         _keepAlive = new SqliteConnection(ConnectionString);
         await _keepAlive.OpenAsync();
@@ -25,7 +25,7 @@ public sealed class SqliteFixture : IAsyncLifetime
         return new SqliteTestDbContext(opts);
     }
 
-    public async Task DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         if (_keepAlive is not null)
         {

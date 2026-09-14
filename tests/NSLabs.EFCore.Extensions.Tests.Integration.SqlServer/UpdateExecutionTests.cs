@@ -8,7 +8,7 @@ public class UpdateExecutionTests : SqlServerTestBase
     {
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_by_id_persists_and_reports_per_op_count()
     {
         RequireDatabase();
@@ -41,7 +41,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal(42, item.Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Mixed_multi_table_batch_applies_everything_in_one_call()
     {
         RequireDatabase();
@@ -73,7 +73,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.False(await verify.AuditLogs.AnyAsync(x => x.Id == 9103));
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Per_op_counts_include_zero_match_operations()
     {
         RequireDatabase();
@@ -100,7 +100,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal(1, result.TotalRowsAffected);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Throw_if_zero_affected_without_transaction_throws_but_does_not_roll_back_previous_ops()
     {
         RequireDatabase();
@@ -129,7 +129,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal("changed", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Throw_if_zero_affected_rolls_back_when_wrapped_in_transaction()
     {
         RequireDatabase();
@@ -159,7 +159,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal("keep", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Same_table_updates_with_different_filters_apply_independently()
     {
         RequireDatabase();
@@ -212,7 +212,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal(0, items[9803].Key3);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Set_assignments_can_be_added_dynamically_with_control_flow()
     {
         RequireDatabase();
@@ -282,7 +282,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Contains("'Key1' more than once", duplicate.Message);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Multiple_entity_types_update_in_one_batch_with_own_filters_and_sets()
     {
         RequireDatabase();
@@ -341,7 +341,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal("Before", customer.Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Same_entity_operations_with_dynamically_built_filters_and_sets()
     {
         RequireDatabase();
@@ -418,7 +418,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         Assert.Equal(0, items[9923].Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Chunked_batch_across_multiple_commands_executes_all_chunks_without_transaction()
     {
         RequireDatabase();
@@ -465,7 +465,7 @@ public class UpdateExecutionTests : SqlServerTestBase
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Chunked_batch_inside_user_transaction_is_atomic()
     {
         RequireDatabase();

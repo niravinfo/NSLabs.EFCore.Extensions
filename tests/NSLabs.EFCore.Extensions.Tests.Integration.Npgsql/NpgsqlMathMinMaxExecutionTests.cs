@@ -6,7 +6,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
 {
     public NpgsqlMathMinMaxExecutionTests(NpgsqlFixture fixture) : base(fixture) { }
 
-    [SkippableFact]
+    [Fact]
     public async Task Min_applies_cap_hit_and_cap_miss()
     {
         RequireDatabase();
@@ -32,7 +32,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
         Assert.Equal(5, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == missId)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Max_applies_floor()
     {
         RequireDatabase();
@@ -52,7 +52,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
         Assert.Equal(10, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Min_nested_round_with_fractional_division_persists()
     {
         RequireDatabase();
@@ -75,7 +75,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
         Assert.Equal(10m, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == orderNo)).Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Min_nested_round_with_column_cap_persists()
     {
         RequireDatabase();
@@ -106,7 +106,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
         Assert.Equal(999999.99m, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == hitNo)).Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_nested_round_with_literal_cap_persists()
     {
         RequireDatabase();
@@ -139,7 +139,7 @@ public class NpgsqlMathMinMaxExecutionTests : NpgsqlTestBase
         Assert.Equal(9999.99m, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == hitNo)).Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_computed_max_persists()
     {
         RequireDatabase();

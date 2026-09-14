@@ -1,5 +1,3 @@
-using Xunit.Sdk;
-
 namespace NSLabs.EFCore.Extensions.Tests.Integration.Npgsql;
 
 [Collection("npgsql")]
@@ -11,7 +9,7 @@ public abstract class NpgsqlTestBase(NpgsqlFixture fixture)
     {
         if (Fixture.UnavailableReason is { } reason)
         {
-            Skip.If(true, reason);
+            Assert.Skip(reason);
         }
     }
 }

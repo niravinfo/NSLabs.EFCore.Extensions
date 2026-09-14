@@ -6,7 +6,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
 {
     public ComputedSetExecutionTests(SqlServerFixture fixture) : base(fixture) { }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_computed_multiply_by_factor_persists_in_sql()
     {
         RequireDatabase();
@@ -34,7 +34,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(110m, reloaded.Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_computed_captured_variable_is_parameterized()
     {
         RequireDatabase();
@@ -58,7 +58,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(15, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_mixed_constant_and_computed_in_same_operation()
     {
         RequireDatabase();
@@ -86,7 +86,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(11, item.Key3); // atomic: 1 + original 10, not 1+20
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_column_to_column_addition()
     {
         RequireDatabase();
@@ -109,7 +109,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(15, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_negate_and_arith_combination()
     {
         RequireDatabase();
@@ -140,7 +140,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(10, (await verify2.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_divide_and_modulo()
     {
         RequireDatabase();
@@ -170,7 +170,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(2, (await verify2.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key3); // 6 %4=2
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_enum_increment_via_computed()
     {
         RequireDatabase();
@@ -191,7 +191,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(OrderStatus.Shipped, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Status);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_sequential_computed_operations_see_prior_writes()
     {
         RequireDatabase();
@@ -219,7 +219,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(40, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_computed_in_single_update_vs_sequential_difference()
     {
         // Proves that a single UPDATE with multiple computed SETs is atomic (all RHS use original row),
@@ -264,7 +264,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(20, sequential.Key3); // 15+5 sequential
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_computed_uses_target_value_not_source()
     {
         RequireDatabase();
@@ -293,7 +293,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(OrderStatus.Pending, reloaded.Status);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_computed_column_to_column()
     {
         RequireDatabase();
@@ -317,7 +317,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(13, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == itemId)).Key2); // 10+3
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_computed_with_guard()
     {
         RequireDatabase();
@@ -364,7 +364,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal("Before_suffix", (await verify2.Customers.AsNoTracking().SingleAsync(x => x.Code == code)).Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_insert_path_ignores_computed_on_not_matched()
     {
         RequireDatabase();
@@ -384,7 +384,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(50m, inserted.Amount); // inserted from VALUES, not doubled
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_mixed_constant_and_computed_with_batching()
     {
         RequireDatabase();
@@ -426,7 +426,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal("New", (await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == codeNew)).Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Computed_with_zero_param_column_to_column_persists()
     {
         RequireDatabase();
@@ -447,7 +447,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(7, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Computed_decimal_precision_roundtrip()
     {
         RequireDatabase();
@@ -469,7 +469,7 @@ public class ComputedSetExecutionTests : SqlServerTestBase
         Assert.Equal(124.00m, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == orderNo)).Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Multiple_computed_ops_across_tables_in_one_roundtrip()
     {
         RequireDatabase();

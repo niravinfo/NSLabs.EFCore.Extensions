@@ -53,7 +53,7 @@ public class ExecutorCoreTests
         var options = new BulkExecuteOptions();
         var transaction = new FakeAdo.Transaction(connection, IsolationLevel.ReadCommitted);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction, chunks, counts, options, CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, transaction, chunks, counts, options, cancellationToken: CancellationToken.None);
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.Equal(chunks[0].CommandText, connection.ExecutedCommands[0].CommandText);
@@ -80,7 +80,7 @@ public class ExecutorCoreTests
         connection.ReaderFactory = _ => new FakeAdo.FakeReader([], []);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None));
+            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None));
     }
 
     [Fact]
@@ -90,7 +90,7 @@ public class ExecutorCoreTests
         connection.ReaderFactory = _ => new FakeAdo.FakeReader(["Op0"], []);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None));
+            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class ExecutorCoreTests
 
         ScriptRowCounts(connection, [2], [5]);
 
-        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None);
+        await EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None);
 
         Assert.Equal(7, counts[0]);
     }
@@ -137,7 +137,7 @@ public class ExecutorCoreTests
         };
 
         await Assert.ThrowsAsync<DataException>(() =>
-            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), CancellationToken.None));
+            EF.SqlServerExecutor.ExecuteCoreAsync(connection, null, chunks, counts, new BulkExecuteOptions(), cancellationToken: CancellationToken.None));
 
         Assert.Equal(2, connection.ExecutedCommands.Count);
         Assert.True(counts.ContainsKey(0));

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -15,8 +16,9 @@ internal sealed class NpgsqlProvider : IBulkProvider
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         CancellationToken cancellationToken)
-        => NpgsqlExecutor.ExecuteAsync(context, chunks, operations, options, cancellationToken);
+        => NpgsqlExecutor.ExecuteAsync(context, chunks, operations, options, logger, cancellationToken);
 }
 
 internal static class NpgsqlProviderRegistration

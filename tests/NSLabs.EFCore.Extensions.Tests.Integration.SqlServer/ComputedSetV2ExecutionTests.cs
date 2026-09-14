@@ -11,7 +11,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
 {
     public ComputedSetV2ExecutionTests(SqlServerFixture fixture) : base(fixture) { }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_concat_plus_persists()
     {
         RequireDatabase();
@@ -33,7 +33,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("Base_suffix", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_to_upper_and_to_lower_persists()
     {
         RequireDatabase();
@@ -60,7 +60,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("hello", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idLow)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_trim_variants_persists()
     {
         RequireDatabase();
@@ -91,7 +91,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("  hello", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idRTrim)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_substring_persists()
     {
         RequireDatabase();
@@ -128,7 +128,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("Suffix", (await verify2.Items.AsNoTracking().SingleAsync(x => x.Id == id2)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_replace_persists()
     {
         RequireDatabase();
@@ -149,7 +149,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("b-b-b", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_string_concat_method_and_length_persists()
     {
         RequireDatabase();
@@ -176,7 +176,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(5, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idLen)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_coalesce_persists()
     {
         RequireDatabase();
@@ -203,7 +203,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(7, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idNotNull)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_conditional_case_when_simple()
     {
         RequireDatabase();
@@ -230,7 +230,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(120, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idHigh)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_conditional_with_is_null_and_coalesce()
     {
         RequireDatabase();
@@ -257,7 +257,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(10, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idNotNull)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_conditional_with_and_or_not_and_boolean_column()
     {
         RequireDatabase();
@@ -288,7 +288,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(15, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id3)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_conditional_string_branches()
     {
         RequireDatabase();
@@ -315,7 +315,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("Base_b", (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == idInactive)).Key1);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_conditional_with_arithmetic_in_branches()
     {
         RequireDatabase();
@@ -339,7 +339,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(13, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Update_math_functions_persists()
     {
         RequireDatabase();
@@ -374,7 +374,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(11m, (await verify.Orders.AsNoTracking().SingleAsync(x => x.OrderNo == orderNoRound)).Amount);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_string_concat_and_coalesce_uses_target_alias()
     {
         RequireDatabase();
@@ -434,7 +434,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal(55, (await verify3.Items.AsNoTracking().SingleAsync(x => x.Id == itemIdNew)).ParentId);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Upsert_conditional_case_when()
     {
         RequireDatabase();
@@ -457,7 +457,7 @@ public class ComputedSetV2ExecutionTests : SqlServerTestBase
         Assert.Equal("Base_a", (await verify.Customers.AsNoTracking().SingleAsync(x => x.Code == code)).Name);
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Combined_batch_with_string_conditional_coalesce_and_math()
     {
         RequireDatabase();

@@ -30,10 +30,11 @@ jobs:
         run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release
 
       - name: Test
-        # Runs both unit and integration tests.
+        # Runs both unit and integration tests (xUnit.net v3 on Microsoft.Testing.Platform;
+        # runner is selected via the "test.runner" setting in global.json, so MTP syntax is required).
         # Integration tests use Testcontainers.MsSql — Docker is available on ubuntu-latest.
-        # If Docker is unavailable they are skipped via Xunit.SkippableFact.
-        run: dotnet test NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --logger "console;verbosity=minimal"
+        # If Docker is unavailable they are skipped via Assert.Skip (xUnit.v3).
+        run: dotnet test --solution NSLabs.EFCore.Extensions.slnx --no-build --configuration Release
 
       - name: Pack (verify packaging)
         run: dotnet pack NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --output ./artifacts
