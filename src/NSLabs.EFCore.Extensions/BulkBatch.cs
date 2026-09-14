@@ -220,7 +220,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
         try
         {
-            var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, cancellationToken).ConfigureAwait(false);
+            var counts = await provider.ExecuteAsync(_context, chunks, _operations, options, logger, cancellationToken).ConfigureAwait(false);
 
             // EF Core pattern: manual loop vs LINQ Select+Sum
             var operationResults = new OperationResult[_operations.Count];

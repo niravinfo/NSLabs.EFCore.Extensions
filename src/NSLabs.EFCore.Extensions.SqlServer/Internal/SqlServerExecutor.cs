@@ -15,13 +15,14 @@ internal static class SqlServerExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         CancellationToken cancellationToken)
     {
         var database = context.Database;
 
         if (database.CurrentTransaction is not null)
         {
-            return RunAsync(context, chunks, operations, options, closeConnection: false, cancellationToken);
+            return RunAsync(context, chunks, operations, options, logger, closeConnection: false, cancellationToken);
         }
 
         var strategy = database.CreateExecutionStrategy();
@@ -38,11 +39,11 @@ internal static class SqlServerExecutor
                     }
 
                     attempt++;
-                    return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+                    return RunAsync(context, chunks, operations, options, logger, closeConnection: true, cancellationToken);
                 });
         }
 
-        return RunAsync(context, chunks, operations, options, closeConnection: true, cancellationToken);
+        return RunAsync(context, chunks, operations, options, logger, closeConnection: true, cancellationToken);
     }
 
     private static async Task<Dictionary<int, int>> RunAsync(
@@ -50,6 +51,7 @@ internal static class SqlServerExecutor
         IReadOnlyList<SqlChunkPlan> chunks,
         IReadOnlyList<BoundOperation> operations,
         BulkExecuteOptions options,
+        ILogger? logger,
         bool closeConnection,
         CancellationToken cancellationToken)
     {
@@ -63,10 +65,6 @@ internal static class SqlServerExecutor
         // Telemetry context — null when not observed (active ActivityListener required).
         // Null means defaults; StartChunkScope re-checks.
         var telemetryContext = TelemetryContext.Resolve(context, connection);
-
-        // Bulk logger — null when no factory is configured. Level checks happen
-        // per chunk event, so this stays level-agnostic.
-        var logger = BulkExecuteLogging.ResolveBulkLogger(context);
 
         try
         {
@@ -136,15 +134,16 @@ internal static class SqlServerExecutor
 
         var isChunkLoggingEnabled = logger?.IsEnabled(LogLevel.Information) == true;
         Stopwatch? chunkStopwatch = null;
-        if (isChunkLoggingEnabled)
-        {
-            BulkExecuteLoggingDefinitions.BulkChunkExecuting(
-                logger!, chunkIndex, chunk.OperationIndices.Count, chunk.Parameters.Count, chunk.CommandText);
-            chunkStopwatch = Stopwatch.StartNew();
-        }
 
         try
         {
+            if (isChunkLoggingEnabled)
+            {
+                BulkExecuteLoggingDefinitions.BulkChunkExecuting(
+                    logger!, chunkIndex, chunk.OperationIndices.Count, chunk.Parameters.Count, chunk.CommandText);
+                chunkStopwatch = Stopwatch.StartNew();
+            }
+
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = chunk.CommandText;

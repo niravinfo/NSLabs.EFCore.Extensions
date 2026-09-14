@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace NSLabs.EFCore.Extensions.Diagnostics;
 
 /// <summary>
-/// Source-generated log messages for bulk execution (Phase 1: batch-level only).
+/// Source-generated log messages for bulk execution.
 /// All call sites must guard with <c>logger.IsEnabled(level)</c> before calling,
 /// so argument evaluation (counts, database name) is skipped when disabled.
 /// </summary>
