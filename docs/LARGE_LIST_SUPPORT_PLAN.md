@@ -52,15 +52,30 @@ This repo pins EF Core 10 (`Directory.Packages.props:9-12`). EF's behavior chang
   ```sql
   WHERE b."Id" = ANY (@__ids_0)   -- @__ids_0 :: integer[]
   ```
-  Source: Npgsql/EF docs ("`arrayNonColumn.Contains(element)` → `element = ANY(arrayNonColumn)`, can use regular index") and EF8 Preview 4 ("we pass the array … directly to ANY"). Complex compositions use `unnest(@p)`; simple `Contains` is `= ANY`. One param, no 65535 pressure, index-friendly.
+  How Npgsql does it: the .NET list is sent as **one array-typed parameter** (binary array encoding for `int[]`/`long[]`/etc.), and the server compares with the `ScalarArrayOp` `= ANY`. This is Npgsql's documented translation — *"arrayNonColumn.Contains(element) → element = ANY(arrayNonColumn) — Can use regular index"* (npgsql.org `efcore/mapping/array.html`, verified §2.4-S1) — and the translation Microsoft's EF blog attributes to the Npgsql provider: *"we pass the array of blog names as a SQL parameter directly to ANY"* (EF8 Preview 4, §2.4-S2). Complex compositions over parameters use `unnest(@p)` (Npgsql EF 8.0 release notes, §2.4-S3); plain `Contains` is `= ANY`, which is what this plan implements.
+  Scale math: the 65535 protocol cap counts **parameters, not array elements** — 5000 ids = 1 param, 50000 ids = still 1 param (~200 KB binary for 50k ints, far under the 1 GB field limit). The `IN (@p0…@pN)` alternative would need 5000–50000 params, ~hundreds of KB of SQL text, a fresh plan per cardinality, and at 50k it nearly exhausts the protocol budget. Within a single-statement `UPDATE … WHERE` (this library's design constraint), `= ANY` is therefore the optimal shape at 5k and still optimal at 50k. The only shape that can beat it past ~tens of thousands of ids is a temp staging table (`COPY` + `ANALYZE` + `JOIN`, which gives the planner statistics) — but that needs extra round trips and DDL, so it belongs to the existing `DESIGN.md` Strategy B staging-table fast path, not to v1 of this plan.
 - **SQLite — `json_each`, single JSON-text param:**
-  EF's exact SQLite parameterized-`Contains` SQL is not called out in the docs the way `OPENJSON`/`ANY` are, but the correct fast path on SQLite is the JSON1 table-valued function (always bundled with modern SQLite / `Microsoft.Data.Sqlite`):
   ```sql
   WHERE "Id" IN (SELECT "value" FROM json_each(@p0))   -- @p0 = '[1,2,3]'
   ```
-  One `TEXT` param, sidesteps the 999-variable limit entirely. `json_each.value` preserves JSON types (integer stays integer, text stays text), so no cast is needed for the common cases.
+  One `TEXT` param. Why `json_each` specifically, and why it is the best single-statement choice (not our invention):
+  - The cap forces a single-param shape: `SQLITE_MAX_VARIABLE_NUMBER` *"defaults to 999 for SQLite versions prior to 3.32.0 (2020-05-22) or 32766 for SQLite versions after 3.32.0"* (sqlite.org `limits.html`, §2.4-S6). Our generator conservatively clamps to 999 (§3), so any N-param `IN` above a few hundred ids is impossible in one statement — 5000 ids would need 6+ chunks/statements through our sequential `SqliteExecutor`.
+  - `json_each` is SQLite's own unpacking mechanism: one of only *"two table-valued functions that can be used to decompose a JSON string"*, with output column `value ANY` holding *"INTEGER, REAL, or TEXT depending on the type of the corresponding JSON field"* — i.e. integers compare as integers with no cast (sqlite.org `json1.html`, §2.4-S7). It is the direct SQLite analog of `OPENJSON`/`unnest`, and the only in-engine way to turn one parameter into a rowset: EF10's framing is exactly this — the JSON array is *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"* (EF10 "What's New", §2.4-S4).
+  - Honesty note: no official SQLite benchmark crowns `json_each` the fastest shape at every size — the claim here is narrower and sourced: above the variable cap it is the only single-statement shape, and below the cap we keep plain `IN` (matching EF10's multi-param default) and let our own benchmark (§8) lock the exact switch mark.
 
 Decision: mirror EF — **OPENJSON (SQL Server) / `= ANY` (PG) / `json_each` (SQLite)**.
+
+### 2.4 Sources (all verified; plan claims trace to these)
+
+- S1 — Npgsql array-operation table: `arrayNonColumn.Contains(element)` → `element = ANY(arrayNonColumn)`, *"Can use regular index"*: `https://www.npgsql.org/efcore/mapping/array.html`
+- S2 — EF8 Preview 4, "Better Contains queries": JSON-array param + `OPENJSON` on SQL Server; *"we pass the array … directly to ANY"* on PostgreSQL: `https://devblogs.microsoft.com/dotnet/announcing-ef8-preview-4`
+- S3 — Npgsql EF 8.0 release notes: `unnest(@p)` for composed parameter collections (complex case; simple `Contains` stays `= ANY`): `https://www.npgsql.org/efcore/release-notes/8.0.html`
+- S4 — EF10 "What's New", parameterized collections: `IN (@p…)` new default with padding; JSON array *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"*; `ParameterTranslationMode` control: `https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-10.0/whatsnew`
+- S5 — `ParameterTranslationMode` enum (`MultipleParameters` = `IN (@p…)`, `Parameter` = single array-like param e.g. `OPENJSON(@p)`, `Constant`): `https://learn.microsoft.com/en-us/dotnet/api/microsoft.entityframeworkcore.parametertranslationmode?view=efcore-10.0`
+- S6 — SQLite variable cap: `SQLITE_MAX_VARIABLE_NUMBER` *"defaults to 999 … prior to 3.32.0 … or 32766 … after 3.32.0"*: `https://sqlite.org/limits.html`
+- S7 — SQLite `json_each`: table-valued function decomposing a JSON string; `value` column typed per JSON field: `https://sqlite.org/json1.html`
+- S8 — EF8→EF10 rationale for the hybrid itself: *"Contains to OPENJSON translation regresses performance … We have plans to switch to WHERE IN (@p1, @p2) by default in 10 … (since SQL Server has a 2100 parameter limit, we'll automatically switch to OPENJSON when needed)"*: `https://github.com/dotnet/efcore/issues/32394`
+- S9 — PostgreSQL `ANY`/`SOME`/`ALL` formal semantics: `https://www.postgresql.org/docs/current/functions-comparisons.html`
 
 ---
 
@@ -80,13 +95,13 @@ So:
 
 Nulls need no special counting: a null element is one more value on the slow path (one `@p NULL` param, exactly as today) and one more `null` element in the JSON/array payload on the fast path — see §4.1 for why we keep EF parity instead of adding `IS NULL` branches.
 
-Proposed default marks (starting values from EF10 reasoning; lock by benchmark in §8):
+Proposed default marks — **starting values, not claimed optima.** No vendor publishes "switch at N" numbers; the hybrid shape itself is sourced (S8: EF regressed small queries with always-`OPENJSON` and moved the default back to `IN` with auto-`OPENJSON` past the cap), while the exact marks below are our initial settings to be locked by the benchmark in §8 (measure `IN` vs fast path at 10/50/100/500/5000 on each provider; keep whichever wins per size):
 
-| Provider | Proposed `Threshold` | Rationale |
+| Provider | Proposed `Threshold` | Sourced rationale |
 |---|---|---|
-| SQL Server | `100` values | Below 100, `IN` params are cheap and give better cardinality; above, `OPENJSON` parse cost is dwarfed by avoiding 100+ params and plan variants. Overflow backstop guarantees ≤2100 compliance regardless. |
-| SQLite | `50` values | 999 budget is tiny; JSON parse on SQLite is cheap; switch early. |
-| PostgreSQL | `50` values (or always-`ANY` — decide in implementation) | `= ANY(array)` is at parity or faster even for small lists and uses a regular index; the only reason to keep small-`IN` is golden-SQL stability. If benchmarks show `ANY` never regresses, simplify PG to always-`ANY`. |
+| SQL Server | `100` values | S8 justifies hybrid over always-`OPENJSON`; below ~100, per-value params are cheap and cardinality-accurate, above they bloat text/plans toward the 2100 cap. Overflow backstop guarantees cap compliance regardless of where the mark lands. |
+| SQLite | `50` values | S6 forces single-param above a few hundred ids regardless; S4's multi-param default keeps small `IN` for plan quality below. 50 is early because our 999 clamp is conservative (modern engines allow 32766, but we do not probe) and `json_each` parse is cheap — benchmark confirms. |
+| PostgreSQL | `50` values (or always-`ANY` — decide in implementation) | S1 (`ANY` *"can use regular index"*) means `ANY` is competitive even small; the only reason to keep small-`IN` is golden-SQL stability. If benchmarks show `ANY` never regresses, simplify PG to always-`ANY`. |
 
 **SQLite 999 hard limit — no issue after this change.** `effectiveLimit = min(user, 999)` stays as-is (safe default; newer SQLite builds allow 32766 but we do not probe for it in v1). It cannot break large lists because the decision runs *before* the overflow check: a 5000-id `IN` becomes 1 param (`json_each`) so the op costs ~2 params total, far under 999. Small lists (≤50) still cost N params and are still budget-checked exactly as today — e.g. 40 ids + 1 SET + 1 discriminator = 42 ≤ 999, one chunk; a hypothetical 900-id list with `Threshold = int.MaxValue` still hits the backstop (`900 + other > 999` → fast path → 1 param). The clamp is therefore never a correctness problem, only a (rarely reached) trigger for the fast path.
 
@@ -255,7 +270,7 @@ Notes: `json_each(@p)` with a JSON array binds the array via the parameter — n
   - Nullable-column null parity: seed rows with `NULL` in the filtered column; list `[1, null]` matches the `1`-rows and never the `NULL`-rows on every provider and on both paths; results agree with the equivalent EF Core `Where(ids.Contains…)` query.
   - Upsert guard containing a large `IN` (regression for `CountParameterNodes(spec.Guard)` path).
   - SQLite `json_each` probe + PG array-type matrix (int/long/string/Guid/DateTime, plus nullable-element arrays e.g. `int?[]`) + SQL Server `NVARCHAR(MAX)` JSON > 4000 chars (proves no truncation).
-- **Perf smoke:** time 5000-id update before (throws / N-param) vs after (1-param) on each provider; record in PR.
+- **Perf smoke:** time 5000-id update before (throws / N-param) vs after (1-param) on each provider; plus a 50k-id PG `= ANY` run (asserts 1 param, succeeds, timed) to prove the 50k case stays single-statement; record in PR. If 50k+ lists become routine, evaluate the `DESIGN.md` Strategy B staging-table path separately — out of scope for v1.
 - **Existing suites green:** all `ChunkingTests` / `SqliteChunkingTests` / `NpgsqlChunkingTests` throw-tests still pass (they use tiny ops, unaffected); full unit + integration suites.
 
 ---
