@@ -292,7 +292,13 @@ internal static class NpgsqlSqlGenerator
         SqlBooleanNode => 0,
         SqlNullCheckNode => 0,
         SqlLikeNode => 1,
-        SqlInNode inNode => inNode.Values.Count,
+        // Always-ANY: one array param per IN (0 for empty/all-null shapes).
+        // byte[]-element lists stay multi-param (v1) and cost per non-null value.
+        SqlInNode inNode => LargeListHelper.NonNullCount(inNode.Values) == 0
+            ? 0
+            : LargeListHelper.IsByteArrayElementList(inNode.Values)
+                ? LargeListHelper.NonNullCount(inNode.Values)
+                : 1,
         SqlIsEmptyNode => 0,
         _ => 0
     };
@@ -363,7 +369,7 @@ internal static class NpgsqlSqlGenerator
             SqlNullCheckNode nullCheck => qualifyTarget
                 ? $"{QualifiedColumn(nullCheck.Property, entityType)} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}"
                 : $"{Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType))} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}",
-            SqlNotNode not => $"NOT ({EmitInner(not.Inner, entityType, qualifyTarget)})",
+            SqlNotNode not => EmitNot(not, entityType, qualifyTarget),
             SqlUnaryNode unary => EmitUnary(unary, entityType, qualifyTarget),
             SqlConditionalNode cond => $"CASE WHEN {EmitInner(cond.Test, entityType, qualifyTarget)} THEN {EmitInner(cond.IfTrue, entityType, qualifyTarget)} ELSE {EmitInner(cond.IfFalse, entityType, qualifyTarget)} END",
             SqlCoalesceNode co => $"COALESCE({EmitInner(co.Left, entityType, qualifyTarget)}, {EmitInner(co.Right, entityType, qualifyTarget)})",
@@ -524,30 +530,121 @@ internal static class NpgsqlSqlGenerator
             return StringBuilderCache.GetStringAndRelease(sb);
         }
 
-        private string EmitIn(SqlInNode inNode, IEntityType entityType, bool qualifyTarget)
+        // Negation of a bare Contains distributes per EF10 (§4.1) instead of wrapping
+        // in NOT (...): the wrapper is wrong for nullable columns in both directions,
+        // and a <> ALL rewrite would diverge from = ANY semantics. Only a NOT whose
+        // direct inner is an IN distributes; deeper NOTs keep the wrapper.
+        private string EmitNot(SqlNotNode not, IEntityType entityType, bool qualifyTarget)
         {
-            if (inNode.Values.Count == 0) return inNode.Negated ? "1=1" : "1=0";
-            var col = qualifyTarget
+            if (not.Inner is SqlInNode inNode)
+            {
+                return EmitInNegated(inNode, entityType, qualifyTarget);
+            }
+
+            return $"NOT ({EmitInner(not.Inner, entityType, qualifyTarget)})";
+        }
+
+        private string Column(SqlInNode inNode, IEntityType entityType, bool qualifyTarget)
+            => qualifyTarget
                 ? QualifiedColumn(inNode.Property, entityType)
                 : Quote(ModelBinder.GetColumnName(inNode.Property, entityType));
-            var op = inNode.Negated ? "NOT IN" : "IN";
-            var sb = StringBuilderCache.Acquire(32);
-            try
+
+        private string EmitIn(SqlInNode inNode, IEntityType entityType, bool qualifyTarget)
+        {
+            // The translator never sets SqlInNode.Negated (negation arrives as SqlNotNode);
+            // honor it anyway so both spellings agree.
+            if (inNode.Negated)
             {
-                sb.Append(col).Append(' ').Append(op).Append(" (");
-                for (var i = 0; i < inNode.Values.Count; i++)
+                return EmitInNegated(inNode, entityType, qualifyTarget);
+            }
+
+            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
+            var col = Column(inNode, entityType, qualifyTarget);
+
+            if (nonNulls.Count == 0)
+            {
+                return hasNull ? $"{col} IS NULL" : "1=0";
+            }
+
+            // OR-expansions are parenthesized: predicate parts are AND-joined bare,
+            // so a bare "... OR ... IS NULL" would misbind to its neighbors.
+            var nullBranch = hasNull && inNode.Property.IsNullable ? $" OR {col} IS NULL" : "";
+
+            // v1 byte[]-element lists stay multi-param (base64 does not round-trip);
+            // everything else is one typed array param (always-ANY, §4.3).
+            if (LargeListHelper.IsByteArrayElementList(inNode.Values))
+            {
+                var sb = StringBuilderCache.Acquire(32);
+                try
                 {
-                    if (i > 0) sb.Append(", ");
-                    sb.Append(EmitValue(inNode.Values[i]));
+                    sb.Append(col).Append(" IN (");
+                    for (var i = 0; i < nonNulls.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append(EmitValue(nonNulls[i]));
+                    }
+
+                    sb.Append(')');
+                    var slow = StringBuilderCache.GetStringAndRelease(sb);
+                    return nullBranch.Length == 0 ? slow : $"({slow}{nullBranch})";
                 }
-                sb.Append(')');
-                return StringBuilderCache.GetStringAndRelease(sb);
+                catch
+                {
+                    StringBuilderCache.Release(sb);
+                    throw;
+                }
             }
-            catch
+
+            var param = EmitValue(NpgsqlLargeList.BuildTypedArray(inNode.Property, nonNulls));
+            var fast = $"{col} = ANY ({param})";
+            return nullBranch.Length == 0 ? fast : $"({fast}{nullBranch})";
+        }
+
+        private string EmitInNegated(SqlInNode inNode, IEntityType entityType, bool qualifyTarget)
+        {
+            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
+            var col = Column(inNode, entityType, qualifyTarget);
+
+            if (nonNulls.Count == 0)
             {
-                StringBuilderCache.Release(sb);
-                throw;
+                return hasNull ? $"{col} IS NOT NULL" : "1=1";
             }
+
+            string core;
+            if (LargeListHelper.IsByteArrayElementList(inNode.Values))
+            {
+                var sb = StringBuilderCache.Acquire(32);
+                try
+                {
+                    sb.Append(col).Append(" NOT IN (");
+                    for (var i = 0; i < nonNulls.Count; i++)
+                    {
+                        if (i > 0) sb.Append(", ");
+                        sb.Append(EmitValue(nonNulls[i]));
+                    }
+
+                    sb.Append(')');
+                    core = StringBuilderCache.GetStringAndRelease(sb);
+                }
+                catch
+                {
+                    StringBuilderCache.Release(sb);
+                    throw;
+                }
+            }
+            else
+            {
+                var param = EmitValue(NpgsqlLargeList.BuildTypedArray(inNode.Property, nonNulls));
+                core = $"NOT ({col} = ANY ({param}))";
+            }
+
+            if (hasNull && inNode.Property.IsNullable)
+            {
+                return $"{core} AND {col} IS NOT NULL";
+            }
+
+            // OR-expansion: parenthesize (see EmitIn).
+            return inNode.Property.IsNullable ? $"({core} OR {col} IS NULL)" : core;
         }
 
         private string EmitIsEmpty(SqlIsEmptyNode empty, IEntityType entityType, bool qualifyTarget)

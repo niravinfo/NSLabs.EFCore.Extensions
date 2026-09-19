@@ -42,11 +42,14 @@ public class NpgsqlPredicateTests
     }
 
     [Fact]
-    public void In_renders_in_clause_with_quotes()
+    public void In_renders_any_with_array_param()
     {
+        // Large-list support: every size uses = ANY with a single typed array param (never IN (@p…)).
         var ids = new[] { 1, 2, 3 };
-        var (sql, _) = NpgsqlHarness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => ids.Contains(x.Id)).Set(x => x.Key3, 1)));
-        Assert.Contains("\"Id\" IN (", sql);
+        var (sql, p) = NpgsqlHarness.GenerateSingle(b => b.Update<Item>(op => op.Where(x => ids.Contains(x.Id)).Set(x => x.Key3, 1)));
+        Assert.Contains("\"Id\" = ANY (@p", sql);
+        Assert.DoesNotContain(" IN (", sql);
+        Assert.IsType<int[]>(p.Single(v => v.Value is int[]).Value);
     }
 
     [Fact]
