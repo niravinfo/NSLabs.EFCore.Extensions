@@ -250,9 +250,18 @@ internal static class LinqPredicateTranslator
                 }
             }
 
-            // Static form: Enumerable.Contains<T>(IEnumerable<T> source, T item) or MemoryExtensions.Contains<T>(ReadOnlySpan<T>, T)
-            if (call.Object is null && call.Arguments.Count == 2)
+            // Static form: Enumerable.Contains<T>(IEnumerable<T> source, T item),
+            // MemoryExtensions.Contains<T>(ReadOnlySpan<T>, T), or its 3-arg overload
+            // with an IEqualityComparer<T> (which the compiler picks for some element
+            // types, e.g. enums — verified via expression dump).
+            if (call.Object is null && (call.Arguments.Count == 2 || call.Arguments.Count == 3))
             {
+                if (call.Arguments.Count == 3 && !IsDefaultEqualityComparer(call))
+                {
+                    throw new NotSupportedException(
+                        "Contains with a custom IEqualityComparer<T> is not supported in predicates; SQL IN uses the database comparison semantics.");
+                }
+
                 var sourceExpr = UnwrapImplicit(call.Arguments[0]);
                 var itemExpr = call.Arguments[1];
                 if (!ReferencesEntity(sourceExpr, entityParameter) && ReferencesEntity(itemExpr, entityParameter) && UnwrapItemMember(itemExpr, entityParameter) is { } im2)
@@ -295,6 +304,30 @@ internal static class LinqPredicateTranslator
                && ReferenceEquals(member.Expression, entityParameter)
             ? member
             : null;
+    }
+
+    // MemoryExtensions.Contains 3-arg form: only the default comparer preserves SQL
+    // IN semantics. A null comparer means default semantics (supported); any other
+    // instance cannot be honored in SQL and fails with a clear error above.
+    private static bool IsDefaultEqualityComparer(MethodCallExpression call)
+    {
+        var comparer = Evaluate(call.Arguments[2]);
+        if (comparer is null)
+        {
+            return true;
+        }
+
+        var elementType = call.Method.GetGenericArguments().FirstOrDefault();
+        if (elementType is null)
+        {
+            return false;
+        }
+
+        var defaultComparer = typeof(EqualityComparer<>)
+            .MakeGenericType(elementType)
+            .GetProperty("Default")?
+            .GetValue(null);
+        return Equals(comparer, defaultComparer);
     }
 
     private static string EscapeLike(string pattern)
