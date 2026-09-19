@@ -10,12 +10,22 @@ namespace NSLabs.EFCore.Extensions.Internal;
 // lives in the core LargeListHelper and is reused from here.
 internal static class SqlServerLargeList
 {
-    // OPENJSON WITH ([Value] <type> '$') clause type (§4.2), derived from EF metadata
-    // with fallback by CLR type of the provider-converted values.
-    // Strings are ALWAYS nvarchar(max): a WITH (nvarchar(n)) would truncate over-long
-    // inputs and false-match rows the exact value could never equal.
-    public static string OpenJsonWithType(IProperty property, IReadOnlyList<object?> nonNulls)
+    // OPENJSON WITH ([Value] <type> '$') clause type (§4.2), or null for the untyped
+    // fallback (`SELECT [v].[value] FROM OPENJSON(@p)`, EF's own shape when it cannot
+    // type the payload). The type MUST describe the converted (JSON) domain, never the
+    // CLR domain: a value-converted column (bool → "Y"/"N") carries strings in JSON,
+    // so a CLR-derived `bit` would throw where the untyped shape succeeds. Returns null
+    // whenever the type is not exactly known — untyped is always result-identical,
+    // only less seekable. Never throws for an exotic type in v1.
+    public static string? OpenJsonWithType(IProperty property, IReadOnlyList<object?> nonNulls)
     {
+        var converter = property.GetValueConverter() ?? property.GetRelationalTypeMapping().Converter;
+        if (converter is not null)
+        {
+            // Converted domain: the store column type is the only exact description.
+            return NormalizeStoreType(property.GetColumnType());
+        }
+
         var clr = Nullable.GetUnderlyingType(property.ClrType) ?? property.ClrType;
         if (clr.IsEnum)
         {
@@ -98,11 +108,60 @@ internal static class SqlServerLargeList
 
         if (clr == typeof(string))
         {
+            // ALWAYS max: a WITH (nvarchar(n)) would truncate over-long inputs and
+            // false-match rows the exact value could never equal.
             return "nvarchar(max)";
         }
 
-        return property.GetColumnType()
-            ?? throw new NotSupportedException(
-                $"Large IN lists over '{property.Name}' ({clr.Name}) are not supported on SQL Server.");
+        // Unmapped CLR without a converter (uint, sbyte, …): EF still knows the store
+        // type — reuse it through the same normalization as the converter path.
+        return NormalizeStoreType(property.GetColumnType());
+    }
+
+    // Maps a store column type to a WITH-clause type. String-ish types normalize to
+    // max of the same unicode-ness (never a capped length — see above); anything
+    // outside the known set yields null (untyped fallback) instead of guessing.
+    private static string? NormalizeStoreType(string? storeType)
+    {
+        if (string.IsNullOrWhiteSpace(storeType))
+        {
+            return null;
+        }
+
+        var t = storeType.Trim().ToLowerInvariant();
+        var paren = t.IndexOf('(');
+        var baseName = paren < 0 ? t : t[..paren];
+        var args = paren < 0 ? "" : t[paren..];
+
+        switch (baseName)
+        {
+            case "int":
+            case "bigint":
+            case "smallint":
+            case "tinyint":
+            case "bit":
+            case "uniqueidentifier":
+            case "date":
+            case "time":
+            case "datetimeoffset":
+            case "float":
+            case "real":
+                return baseName;
+            case "datetime2":
+                return "datetime2";
+            case "decimal":
+            case "numeric":
+                // Keep exact precision/scale when present; bare decimal defaults to
+                // decimal(18,0) in SQL Server, which would silently corrupt fractions.
+                return args.Length > 2 ? $"decimal{args}" : null;
+            case "nvarchar":
+            case "nchar":
+                return "nvarchar(max)";
+            case "varchar":
+            case "char":
+                return "varchar(max)";
+            default:
+                return null;
+        }
     }
 }

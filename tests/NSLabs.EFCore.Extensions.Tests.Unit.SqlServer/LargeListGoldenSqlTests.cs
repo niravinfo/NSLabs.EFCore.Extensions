@@ -182,6 +182,24 @@ public class LargeListGoldenSqlTests
     }
 
     [Fact]
+    public void Value_converted_enum_uses_store_type_in_with()
+    {
+        // Item.Status has HasConversion<int>(): the JSON holds converted ints,
+        // so WITH must describe the store domain (int), not the CLR enum.
+        var ids = new[] { OrderStatus.Pending, OrderStatus.Shipped }.Concat(
+            Enumerable.Range(0, 150).Select(i => (OrderStatus)(i % 3))).ToList();
+        var (sql, p) = Harness.GenerateSingle(
+            b => b.Update<Item>(op => op.Where(x => ids.Contains(x.Status)).Set(x => x.Key3, 1)));
+
+        Assert.Contains("WITH ([Value] int '$')", sql);
+        Assert.Equal(2, p.Count);
+
+        var payload = p.Single(v => v.Value is string s && s.StartsWith('[')).Value as string;
+        Assert.NotNull(payload);
+        Assert.Equal(ids.Select(s => (int)s).ToList(), JsonSerializer.Deserialize<List<int>>(payload));
+    }
+
+    [Fact]
     public void Delete_with_5000_ids_is_one_chunk_one_param()
     {
         var ids = Enumerable.Range(1, 5000).ToList();

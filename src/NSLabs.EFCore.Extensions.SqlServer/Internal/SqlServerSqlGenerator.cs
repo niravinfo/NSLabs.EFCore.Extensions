@@ -727,11 +727,29 @@ internal static class SqlServerSqlGenerator
                 return nullBranch.Length == 0 ? slow : $"({slow}{nullBranch})";
             }
 
+            var fast = EmitOpenJson(col, inNode.Property, nonNulls);
+            return nullBranch.Length == 0 ? fast : $"({fast}{nullBranch})";
+        }
+
+        // Single-param OPENJSON predicate. Typed WITH when the converted domain is
+        // exactly known; untyped default-schema fallback (`[v].[value]`) otherwise —
+        // untyped is always result-identical via implicit conversion, only less seekable.
+        private string EmitOpenJson(string col, IProperty property, List<object?> nonNulls)
+        {
             var json = LargeListHelper.BuildJsonArray(nonNulls);
             var param = EmitValue(json);
-            var withType = SqlServerLargeList.OpenJsonWithType(inNode.Property, nonNulls);
-            var fast = $"{col} IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])";
-            return nullBranch.Length == 0 ? fast : $"({fast}{nullBranch})";
+            return SqlServerLargeList.OpenJsonWithType(property, nonNulls) is { } withType
+                ? $"{col} IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])"
+                : $"{col} IN (SELECT [v].[value] FROM OPENJSON({param}) AS [v])";
+        }
+
+        private string EmitOpenJsonNegated(string col, IProperty property, List<object?> nonNulls)
+        {
+            var json = LargeListHelper.BuildJsonArray(nonNulls);
+            var param = EmitValue(json);
+            return SqlServerLargeList.OpenJsonWithType(property, nonNulls) is { } withType
+                ? $"{col} NOT IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])"
+                : $"{col} NOT IN (SELECT [v].[value] FROM OPENJSON({param}) AS [v])";
         }
 
         private string EmitInNegated(SqlInNode inNode, IEntityType entityType, string? alias)
@@ -760,10 +778,7 @@ internal static class SqlServerSqlGenerator
             }
             else
             {
-                var json = LargeListHelper.BuildJsonArray(nonNulls);
-                var param = EmitValue(json);
-                var withType = SqlServerLargeList.OpenJsonWithType(inNode.Property, nonNulls);
-                core = $"{col} NOT IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])";
+                core = EmitOpenJsonNegated(col, inNode.Property, nonNulls);
             }
 
             if (hasNull && inNode.Property.IsNullable)
