@@ -41,13 +41,13 @@ Existing tests lock in the current small-list behavior and the throw behavior:
 
 ## 2. What EF Core 10 does (executable ground truth — observed, not quoted)
 
-This repo pins EF Core 10.0.12 + Npgsql 10.0.3 (`Directory.Packages.props:9-12`; verified on disk: `Microsoft.EntityFrameworkCore.SqlServer.dll` = `10.0.12`, `Npgsql.EntityFrameworkCore.PostgreSQL.dll` = `10.0.3+5e912bf`). Instead of trusting old blogs, we ran that exact build and captured `ToQueryString()` for small / padded / 5000-id / null / `EF.Parameter` cases on all three providers (probe projects under `%TEMP%\opencode\ef10probe*`; full verbatim table in §10). Summary:
+This repo pins EF Core 10.0.12 + Npgsql 10.0.3 (`Directory.Packages.props:9-12`; verified on disk: `Microsoft.EntityFrameworkCore.SqlServer.dll` = `10.0.12`, `Npgsql.EntityFrameworkCore.PostgreSQL.dll` = `10.0.3+5e912bf`). Instead of trusting old blogs, we ran that exact build and captured `ToQueryString()` for small / threshold / 5000-id / null / `EF.Parameter` cases on all three providers (probe projects under `%TEMP%\opencode\efprobe*`; full verbatim table in §10). Summary:
 
-- **SQL Server — default: `IN (@p…)` small (with padding: 8 values → 10 params, last value duplicated), auto-`OPENJSON` large:**
+- **SQL Server — default: inline constants small (`IN (1, 2, 3)` — zero params, no padding on 10.0.12), auto-`OPENJSON` large (switch observed in (2500, 2550] values single-list, and combined-total past ~2100: 2000 stays inline, 2100 flips — S12):**
   ```sql
-  -- 3 ids (default):
-  WHERE [b].[Id] IN (@ids31, @ids32, @ids33)
-  -- 5000 ids (default): single nvarchar(max) JSON param, auto-switched past the cap:
+  -- 3 ids (default): inline constants, zero params:
+  WHERE [b].[Id] IN (1, 2, 3)
+  -- 5000 ids (default): single nvarchar(max) JSON param, auto-switched (S12 marks above):
   -- DECLARE @ids5000 nvarchar(max) = N'[1,2,…,5000]'
   WHERE [b].[Id] IN (
       SELECT [__openjson0].[Value]
@@ -56,14 +56,18 @@ This repo pins EF Core 10.0.12 + Npgsql 10.0.3 (`Directory.Packages.props:9-12`;
   -- EF.Parameter(ids) at ANY size: same OPENJSON shape (ids3 → nvarchar(4000) JSON)
   ```
   Secondary docs: EF8 breaking-change notes + EF8 Preview 4 blog; EF10 keeps `OPENJSON` as the overflow strategy (dotnet/efcore#32394: *"automatically switch to OPENJSON when needed"*; EF10 "Improved translation for parameterized collection"). Requires compat 130+; baseline here is 150+, no compat gate (§4.2). Collation pitfall for custom-collation string columns (dotnet/efcore#32147) stays a §7 risk.
-- **PostgreSQL (Npgsql) — `= ANY (@array)` at EVERY size (3, 8 and 5000 observed identical shape):**
+- **PostgreSQL (Npgsql 10.0.3) — inline constants for non-nullable lists at EVERY size (3 and 5000 identical `IN (1, 2, …)`); `= ANY (@array)` only for nullable-element-type lists (2-elem no-null stays constants; 2-elem with-null, 5000-elem with- and without-null all `ANY` — S12):**
   ```sql
-  -- @ids3 / @ids5000 as a single array-typed parameter (binary array encoding):
-  WHERE b."Id" = ANY (@ids3)
+  -- non-nullable lists (any size): inline constants, zero params:
+  WHERE b."Id" IN (1, 2, 3)
+  -- nullable-element-type lists: one array-typed parameter (binary array encoding),
+  -- NULLs kept, runtime null check:
+  -- @pgNull={ '1', NULL } (DbType = Object)
+  WHERE b."N" = ANY (@pgNull) OR (b."N" IS NULL AND array_position(@pgNull, NULL) IS NOT NULL)
   ```
-  How Npgsql does it: the .NET list is sent as **one array-typed parameter**, server compares with `ScalarArrayOp = ANY`. This is Npgsql's documented translation — *"arrayNonColumn.Contains(element) → element = ANY(arrayNonColumn) — Can use regular index"* (npgsql.org `efcore/mapping/array.html`, §2.4-S1) — and Microsoft's EF blog attributes it to the provider: *"we pass the array … directly to ANY"* (EF8 Preview 4, §2.4-S2). Complex compositions use `unnest(@p)` (Npgsql EF 8.0 notes, §2.4-S3); plain `Contains` is `= ANY`. The provider authors choosing `ANY` even for 3-element lists is the strongest available endorsement that it is the optimal single-statement shape — there is no faster per-size alternative to switch between, so **PG gets always-`ANY`, no threshold** (§3).
+   How Npgsql does it when it parameterizes: the .NET list is sent as **one array-typed parameter**, server compares with `ScalarArrayOp = ANY`. This is Npgsql's documented translation — *"arrayNonColumn.Contains(element) → element = ANY(arrayNonColumn) — Can use regular index"* (npgsql.org `efcore/mapping/array.html`, §2.4-S1) — and Microsoft's EF blog attributes it to the provider: *"we pass the array … directly to ANY"* (EF8 Preview 4, §2.4-S2). Complex compositions use `unnest(@p)` (Npgsql EF 8.0 notes, §2.4-S3). `ANY` is Npgsql's only parameterized shape (it has no multi-param array expansion), it is index-capable, and it is cap-proof — so **PG gets always-`ANY`, no threshold** (§3). This is our parameterized choice for a bulk library that cannot inline constants, not a mirror of Npgsql's inline-constants default.
   Scale math: the 65535 protocol cap counts **parameters, not array elements** — 5000 ids = 1 param, 50000 ids = still 1 param (~200 KB binary for 50k ints, far under the 1 GB field limit). The only shape that can beat it past ~tens of thousands of ids is a temp staging table (`COPY` + `ANALYZE` + `JOIN`, planner statistics) — extra round trips + DDL, so it belongs to the existing `DESIGN.md` Strategy B path, not v1.
-- **SQLite — default: `IN (@p…)` at every size (8 → padded to 10, 1500 ids → 1500 params, NO auto-switch observed); `EF.Parameter` → `json_each`:**
+- **SQLite — default: inline constants at every probed size (3, 8, 1500 — no params, no padding, no auto-switch on 10.0.12); `EF.Parameter` → `json_each` (holds — S12):**
   ```sql
   -- EF.Parameter(ids3): single TEXT JSON param:
   -- .param set @ids3 '[1,2,3]'
@@ -72,32 +76,33 @@ This repo pins EF Core 10.0.12 + Npgsql 10.0.3 (`Directory.Packages.props:9-12`;
       FROM json_each(@ids3) AS "i"
   )
   ```
-  Why `json_each` is the right single-param shape (not our invention): the variable cap `SQLITE_MAX_VARIABLE_NUMBER` *"defaults to 999 for SQLite versions prior to 3.32.0 (2020-05-22) or 32766 for SQLite versions after 3.32.0"* (sqlite.org `limits.html`, §2.4-S6) — EF10's default path emits N params and relies on the modern 32766 engine limit, but our generator conservatively clamps to 999, so the overflow backstop (§3) routes large lists to `json_each` where EF10 itself would emit 1500 params. `json_each` is one of only *"two table-valued functions that can be used to decompose a JSON string"*, with output column `value ANY` holding *"INTEGER, REAL, or TEXT depending on the type of the corresponding JSON field"* — integers compare as integers, no cast (sqlite.org `json1.html`, §2.4-S7). It is the direct SQLite analog of `OPENJSON`, and EF10's own framing is exactly this: the JSON array is *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"* (EF10 "What's New", §2.4-S4).
-  Honesty note: no vendor publishes switch-at-N numbers — the claim here is narrower and sourced: above the variable cap a single-param shape is mandatory, and `json_each` is the only in-engine one; below the cap we keep plain `IN` (matching EF10's multi-param default) and our own benchmark (§8) locks the exact switch mark.
+  Why `json_each` is the right single-param shape (not our invention): the variable cap `SQLITE_MAX_VARIABLE_NUMBER` *"defaults to 999 for SQLite versions prior to 3.32.0 (2020-05-22) or 32766 for SQLite versions after 3.32.0"* (sqlite.org `limits.html`, §2.4-S6) — EF10's default path inlines N constants (no params at all, plan-cache cost per cardinality), while our generator must parameterize (injection-proof architecture + countable chunk budgets) and conservatively clamps to 999, so the overflow backstop (§3) routes large lists to `json_each` where EF10 itself would inline 1500 constants. `json_each` is one of only *"two table-valued functions that can be used to decompose a JSON string"*, with output column `value ANY` holding *"INTEGER, REAL, or TEXT depending on the type of the corresponding JSON field"* — integers compare as integers, no cast (sqlite.org `json1.html`, §2.4-S7). It is the direct SQLite analog of `OPENJSON`, and EF10's own framing is exactly this: the JSON array is *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"* (EF10 "What's New", §2.4-S4).
+  Honesty note: below the cap we keep parameterized `IN (@p…)` — the parameterized analog of EF10's inline-constants default (we cannot inline); our own benchmark (§8) locks the exact switch mark.
 
-Decision: mirror EF10 — **`IN`-small + `OPENJSON`-large (SQL Server) / always-`ANY` (PG) / `IN`-small + `json_each`-large (SQLite)**. Full verbatim evidence table: §10.
+Decision: mirror EF10's hybrid with parameterized small paths — **params-`IN`-small + `OPENJSON`-large (SQL Server) / always-`ANY` (PG) / params-`IN`-small + `json_each`-large (SQLite)**. Full verbatim evidence table: §10.
 
 ### 2.4 Sources (all verified; plan claims trace to these)
 
-- S0 — Executable ground truth (strongest source in this plan): `ToQueryString()` captured from the pinned builds — EFCore `10.0.12`, Npgsql provider `10.0.3+5e912bf` (DLL product versions read off disk) — for 3 / 8 / 1500 / 5000-element `Contains`, null/all-null/negated variants, and `EF.Parameter`-forced single-param form, on all three providers without connecting (verbatim table: §10).
+- S0 — Executable ground truth, 10.0.0-era round (superseded on defaults by S12, still valid on null semantics): `ToQueryString()` captured from the pinned builds — EFCore `10.0.12`, Npgsql provider `10.0.3+5e912bf` (DLL product versions read off disk) — for 3 / 8 / 1500 / 5000-element `Contains`, null/all-null/negated variants, and `EF.Parameter`-forced single-param form, on all three providers without connecting (verbatim table: §10). Its `IN (@p…)` + padding claims no longer hold on 10.0.12 (now inline constants, no padding — S12); its null-branch shapes do.
 
 - S1 — Npgsql array-operation table: `arrayNonColumn.Contains(element)` → `element = ANY(arrayNonColumn)`, *"Can use regular index"*: `https://www.npgsql.org/efcore/mapping/array.html`
 - S2 — EF8 Preview 4, "Better Contains queries": JSON-array param + `OPENJSON` on SQL Server; *"we pass the array … directly to ANY"* on PostgreSQL: `https://devblogs.microsoft.com/dotnet/announcing-ef8-preview-4`
 - S3 — Npgsql EF 8.0 release notes: `unnest(@p)` for composed parameter collections (complex case; simple `Contains` stays `= ANY`): `https://www.npgsql.org/efcore/release-notes/8.0.html`
-- S4 — EF10 "What's New", parameterized collections: `IN (@p…)` new default with padding; JSON array *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"*; `ParameterTranslationMode` control: `https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-10.0/whatsnew`
+- S4 — EF10 "What's New", parameterized collections (10.0.0 docs — rendering since moved to inline constants per S12; mode control still valid): `IN (@p…)` new default with padding; JSON array *"unpacked using the SQL Server OPENJSON function (other databases use similar mechanisms)"*; `ParameterTranslationMode` control: `https://learn.microsoft.com/en-us/ef/core/what-is-new/ef-core-10.0/whatsnew`
 - S5 — `ParameterTranslationMode` enum (`MultipleParameters` = `IN (@p…)`, `Parameter` = single array-like param e.g. `OPENJSON(@p)`, `Constant`): `https://learn.microsoft.com/en-us/dotnet/api/microsoft.entityframeworkcore.parametertranslationmode?view=efcore-10.0`
 - S6 — SQLite variable cap: `SQLITE_MAX_VARIABLE_NUMBER` *"defaults to 999 … prior to 3.32.0 … or 32766 … after 3.32.0"*: `https://sqlite.org/limits.html`
 - S7 — SQLite `json_each`: table-valued function decomposing a JSON string; `value` column typed per JSON field: `https://sqlite.org/json1.html`
 - S8 — EF8→EF10 rationale for the hybrid itself: *"Contains to OPENJSON translation regresses performance … We have plans to switch to WHERE IN (@p1, @p2) by default in 10 … (since SQL Server has a 2100 parameter limit, we'll automatically switch to OPENJSON when needed)"*: `https://github.com/dotnet/efcore/issues/32394`
 - S9 — PostgreSQL `ANY`/`SOME`/`ALL` formal semantics: `https://www.postgresql.org/docs/current/functions-comparisons.html`
-- S10 — EF10 multi-collection overflow bug (verified Dec 2025): EF judges **each collection alone** against the cap — two collections of 1200 + 1500 (= 2700 params) get **no fallback and fail** with `SqlException: too many parameters`, while a single 2500-item collection correctly falls back to `OPENJSON`: `https://github.com/dotnet/efcore/issues/37347` (closed as duplicate of S11)
-- S11 — Same-collection-used-twice variant (params duplicate ×2 across `WHERE` + `ORDER BY`, same failure): triaged by EF as `regression` (`area-query`, `area-sqlserver`), milestone `10.0.2` — fix presence in our pinned `10.0.12` build unverified (S0 probes covered single-collection cases only): `https://github.com/dotnet/efcore/issues/37185`
+- S10 — EF10 multi-collection overflow bug (10.0.0-era, FIXED in our pin — see S12): on 10.0.0 EF judged **each collection alone** — two collections of 1200 + 1500 got **no fallback and failed** with `SqlException: too many parameters`: `https://github.com/dotnet/efcore/issues/37347` (closed as duplicate of S11)
+- S11 — Same-collection-used-twice variant: triaged by EF as `regression` (`area-query`, `area-sqlserver`), milestone `10.0.2` — the fix IS in our pinned `10.0.12` (S12 verifies combined totals flip): `https://github.com/dotnet/efcore/issues/37185`
+- S12 — Executable ground truth, 10.0.12 round (current — supersedes S0 on defaults and S10/S11 status): `ToQueryString()` probes run 2026-09-18 against the exact pins (EFCore.SqlServer/Sqlite `10.0.12`, Npgsql provider `10.0.3`) without connecting. Findings: small/1500/5000 non-nullable lists inline as constants on all three providers (no params, no padding); SQL Server flips single lists to `OPENJSON` in (2500, 2550] values and flips whole queries on combined total past ~2100 (2000 inline, 2100 `OPENJSON`, each collection its own JSON param); Npgsql flips nullable-element-type lists to `= ANY` (kept `NULL`s + runtime `array_position` branch); `EF.Parameter` forces `json_each` on SQLite; null-branch semantics match S0. Probe project kept outside the repo (`%TEMP%\opencode\efprobe*`); results locked in §10.
 
 ---
 
 ## 3. The "mark" (threshold): hybrid, and yes — it is a performance decision
 
-Yes: the mark is chosen performance-wise, per provider — not just to dodge the cap. This mirrors EF10's explicit tradeoff (`ParameterTranslationMode.MultipleParameters` default for plan quality vs `Parameter` single-param mode):
+Yes: the mark is chosen performance-wise, per provider — not just to dodge the cap. This mirrors EF's explicit tradeoff (per-value visibility for plan quality vs single-param mode — S12 shows EF keeping values visible inline until it must switch):
 
 - **Small `IN (@p0…)`**: the optimizer sees each value (better cardinality estimates), seeks indexes directly, no JSON-parse / array-materialize overhead. Fastest for tens of values.
 - **Large single-param path (`OPENJSON` / `= ANY` / `json_each`)**: parse cost is fixed and small, while N-param SQL costs grow linearly (text size, wire bytes, plan-cache variants, and for SQL Server/SQLite the hard cap). Fastest for hundreds-to-thousands of values.
@@ -115,9 +120,9 @@ Proposed default marks — **starting values, not claimed optima.** No vendor pu
 
 | Provider | Proposed `Threshold` | Sourced rationale |
 |---|---|---|
-| SQL Server | `100` values | S8/S0 justify hybrid over always-`OPENJSON`; below ~100, per-value params are cheap and cardinality-accurate, above they bloat text/plans toward the 2100 cap. Overflow backstop guarantees cap compliance regardless of where the mark lands. |
-| SQLite | `50` values | S6 forces single-param above a few hundred ids regardless; S4's multi-param default keeps small `IN` for plan quality below. 50 is early because our 999 clamp is conservative (modern engines allow 32766, but we do not probe) and `json_each` parse is cheap — benchmark confirms. |
-| PostgreSQL | none — always `= ANY` | S0: Npgsql emits `= ANY` even for 3 ids; S1: index-capable. No threshold, no small-`IN` path. Consequence: existing Npgsql golden tests that assert small `IN (@p…)` must be updated to `= ANY` (listed in §8). |
+| SQL Server | `100` values | S8/S12 justify hybrid over always-`OPENJSON`; below ~100, per-value params are cheap and cardinality-accurate, above they bloat text/plans toward the 2100 cap. EF's own mark sits near ~2500 because a single EF query has no chunk budget — ours shares a 2000-param budget across batched ops, so we switch earlier; the benchmark (§8) locks the exact mark. Overflow backstop guarantees cap compliance regardless of where the mark lands. |
+| SQLite | `50` values | S6 forces single-param above a few hundred ids regardless; small parameterized `IN` keeps per-value plan quality (same reason EF inlines small constants — S12). 50 is early because our 999 clamp is conservative (modern engines allow 32766, but we do not probe) and `json_each` parse is cheap — benchmark confirms. |
+| PostgreSQL | none — always `= ANY` | S12: Npgsql inlines non-nullable constants, so there is no small parameterized shape to mirror — `ANY` is its only parameterized form and is index-capable (S1); our no-inline architecture forces parameterization, hence always-`ANY`. No threshold, no small-`IN` path. Consequence: existing Npgsql golden tests that assert small `IN (@p…)` must be updated to `= ANY` (listed in §8). |
 
 **SQLite 999 hard limit — no issue after this change.** `effectiveLimit = min(user, 999)` stays as-is (safe default; newer SQLite builds allow 32766 but we do not probe for it in v1). It cannot break large lists because the decision runs *before* the overflow check: a 5000-id `IN` becomes 1 param (`json_each`) so the op costs ~2 params total, far under 999. Small lists (≤50) still cost N params and are still budget-checked exactly as today — e.g. 40 ids + 1 SET + 1 discriminator = 42 ≤ 999, one chunk; a hypothetical 900-id list with `Threshold = int.MaxValue` still hits the backstop (`900 + other > 999` → fast path → 1 param). The clamp is therefore never a correctness problem, only a (rarely reached) trigger for the fast path.
 
@@ -187,7 +192,7 @@ Large — one `NVARCHAR(MAX)` JSON param of the **non-null** values (S0: `@p = N
 [Id] NOT IN (SELECT …) OR [Id] IS NULL                             -- negated, no nulls, nullable col
 ```
 
-Deliberate deviation from S0 (documented, results-identical): EF omits the `WITH` clause when the values contained null (default schema + implicit conversion). We **always** emit `WITH ([Value] <type> '$')` from the EF column/store type because the column type is known at bind time — avoids the implicit conversion and keeps the predicate sargable. Not mirrored from EF (also not mirrored): padding (8→10 — pointless for per-execution SQL with no plan reuse), single-value `=` rewrite, inline constants in negated small `IN`, `nvarchar(4000)`-vs-`max` param sizing (we always send `NVARCHAR(MAX)`-capable params; §5 item 7), and EF's `@p_without_nulls` naming (ours keep chunk `@pN` naming).
+Deliberate deviation from S0/S12 (documented, results-identical): EF omits the `WITH` clause when the values contained null (default schema + implicit conversion; still true on 10.0.12 — S12). We **always** emit `WITH ([Value] <type> '$')` from the EF column/store type because the column type is known at bind time — avoids the implicit conversion and keeps the predicate sargable. Not mirrored from EF: inline constants (our architecture forbids interpolation — injection-proof by construction — and chunking needs countable params; our `IN (@p…)` is the parameterized analog), single-value `=` rewrite, `nvarchar(4000)`-vs-`max` param sizing (we always send `NVARCHAR(MAX)`-capable params; live-proven, no truncation — §5 item 7), and EF's `@p_without_nulls` naming (ours keep chunk `@pN` naming). No padding either way (10.0.12 doesn't pad; pointless for per-execution SQL with no plan reuse).
 
 MERGE-guard alias: upsert guards emit via `Emit(guard, entityType, TargetAlias)`, so the outer column is qualified (`[t].[Id] IN (SELECT …)`, `[t].[Id] … OR [t].[Id] IS NULL`) while the `OPENJSON` subquery stays unqualified. The shapes above show the unaliased UPDATE/DELETE form; the guard form only adds the `[t].` qualifier to the outer column references.
 
@@ -339,21 +344,26 @@ Notes: `json_each(@p)` with a JSON array binds the array via the parameter — n
 
 ## 10. Appendix — EF10 ground-truth verbatims (S0)
 
-Method: console probe referencing the pinned builds (EFCore `10.0.12`, Npgsql provider `10.0.3+5e912bf`), `ToQueryString()` only (never connects), entity `Blog { int Id; string Name; int? N; Guid G }`. `N` = nullable column, `Id` = non-nullable column. Whitespace normalized; params shown as EF prints them.
+Method: console probe referencing the pinned builds (EFCore `10.0.12`, Npgsql provider `10.0.3+5e912bf`), `ToQueryString()` only (never connects), entity `Blog { int Id; string Name; int? N; Guid G }`. `N` = nullable column, `Id` = non-nullable column. Whitespace normalized; params shown as EF prints them. Rows tagged S12 were re-verified 2026-09-18 against the exact pins; untagged rows are S0-era — null-branch shapes re-observed stable across both rounds (same strip/branch/distribution logic; only the value rendering changed from params to inline constants).
 
 **SQL Server**
 
 | Case | Verbatim SQL |
 |---|---|
-| 3 ids vs `Id` | `WHERE [b].[Id] IN (@ids31, @ids32, @ids33)` |
-| 8 ids vs `Id` | `WHERE [b].[Id] IN (@ids81, …, @ids810)` — 10 params, `@ids89 = @ids810 = 8` (padding) |
+| 3 ids vs `Id` | `WHERE [b].[Id] IN (1, 2, 3)` — inline constants, zero params, no padding (S12; S0's `@p…`+padding claims are stale) |
+| 8 ids vs `Id` | `WHERE [b].[Id] IN (1, …, 8)` — 8 values inline, no padding (S12) |
+| 2500 ids vs `Id` | still inline constants (S12) |
+| 2550–6000 ids vs `Id` | `DECLARE @ids nvarchar(max) = N'[1,2,…]'` … `WITH ([Value] int '$')` (S12; single-list switch in (2500, 2550]) |
 | 5000 ids vs `Id` | `DECLARE @ids5000 nvarchar(max) = N'[1,2,…,5000]'` … `WHERE [b].[Id] IN (SELECT [__openjson0].[Value] FROM OPENJSON(@ids5000) WITH ([Value] int '$') AS [__openjson0])` |
-| `EF.Parameter(ids)` any size | same `OPENJSON` shape (3 ids → `nvarchar(4000)` JSON `N'[1,2,3]'`, `WITH ([value] int '$')`) |
-| `{1, null}` vs `N` | `WHERE [b].[N] IS NULL OR [b].[N] = @nullables1` |
-| `!{1, null}` vs `N` | `WHERE [b].[N] IS NOT NULL AND [b].[N] <> @nullables1` |
-| `{1, 2}` (`List<int?>`, no nulls) vs `N` | `WHERE [b].[N] IN (@p1, @p2)` (no null branch — value-based) |
-| `!{1, 2}` vs `N` | `WHERE [b].[N] NOT IN (@p1, @p2) OR [b].[N] IS NULL` |
-| `{1, null}` vs `Id` | `WHERE [b].[Id] = @nb1` (null dropped, single → `=`) |
+| combined 100+100 | both inline (S12) |
+| combined 1000+1000 (= 2000) | both inline (S12) |
+| combined 1000+1100 (= 2100) / 1200+1500 / 2000+100 | EACH collection its own `OPENJSON` param (`@la/@lb`, each `WITH ([Value] int '$')`) (S12; whole-query flip past ~2100 total — S10/S11 fixed) |
+| `EF.Parameter(ids)` any size | same `OPENJSON` shape (3 ids → `nvarchar(4000)` JSON `N'[1,2,3]'`, `WITH ([value] int '$')`) (S0) |
+| `{1, null}` vs `N` | `WHERE [b].[N] IS NULL OR [b].[N] = @oneNull1` (S12; single value stays `=` param) |
+| `!{1, null}` vs `N` | `WHERE [b].[N] IS NOT NULL AND [b].[N] <> @oneNull1` (S12) |
+| `{1, 2}` (`List<int?>`, no nulls) vs `N` | `WHERE [b].[N] IN (1, 2)` inline (S12; no null branch — value-based) |
+| `!{1, 2}` vs `N` | `WHERE [b].[N] NOT IN (1, 2) OR [b].[N] IS NULL` (S12) |
+| `{1, null}` vs `Id` | `WHERE [b].[Id] = @nb1` (null dropped, single → `=`) (S0) |
 | 5000+null vs `N` | `DECLARE @bigWithNull_without_nulls nvarchar(max) = N'[1,2,…,5000]'` … `WHERE [b].[N] IN (SELECT [__openjson0].[Value] FROM OPENJSON(@bigWithNull_without_nulls) AS [__openjson0]) OR [b].[N] IS NULL` (null stripped; note: **no `WITH`** — our §4.2 always emits `WITH`, deliberate deviation) |
 | `!`(5000+null) vs `N` | `WHERE [b].[N] NOT IN (SELECT … OPENJSON(@…_without_nulls) …) AND [b].[N] IS NOT NULL` |
 | 5000 no-nulls (`List<int?>`) vs `N` | `WITH ([Value] int '$')`, no null branch; negated: `NOT IN (SELECT …) OR [b].[N] IS NULL` |
@@ -363,22 +373,23 @@ Method: console probe referencing the pinned builds (EFCore `10.0.12`, Npgsql pr
 
 | Case | Verbatim SQL |
 |---|---|
-| 3 / 8 ids | `IN (@p…)` (8 → padded to 10, dup last) |
-| 1500 ids, default path | 1500 params, **no auto-switch** (relies on modern 32766 engine limit) |
-| `EF.Parameter(ids)` | `.param set @ids3 '[1,2,3]'` … `WHERE "b"."Id" IN (SELECT "i"."value" FROM json_each(@ids3) AS "i")` |
+| 3 / 8 / 1500 ids | inline constants (`IN (1, 2, 3)` … `IN (1, …, 1500)`) — no params, no padding, no auto-switch (S12; S0's param/padding claims are stale) |
+| `EF.Parameter(ids)` | `.param set @p3 '[1,2,3]'` … `WHERE "b"."Id" IN (SELECT "p"."value" FROM json_each(@p3) AS "p")` (S12 — single-param shape holds; our large-path choice) |
 | `{1, null}` vs `N` | `WHERE "b"."N" IS NULL OR "b"."N" = @p` |
 | `EF.Parameter({1, null})` vs `N` | `.param set @nb_without_nulls '[1]'` … `WHERE "b"."N" IN (SELECT "n"."value" FROM json_each(@nb_without_nulls) AS "n") OR "b"."N" IS NULL` |
 | `!EF.Parameter({1, null})` vs `N` | `WHERE "b"."N" NOT IN (SELECT … json_each …) AND "b"."N" IS NOT NULL` |
 
-**Npgsql** (always `= ANY`; `-- @p={…} (DbType = Object)` display)
+**Npgsql 10.0.3** (constants for non-nullable lists; `= ANY` for nullable-element-type lists; `-- @p={…} (DbType = Object)` display — S12 throughout; S0's "always `ANY`" is stale)
 
 | Case | Verbatim SQL |
 |---|---|
-| 3 / 8 / 5000 ids vs `Id` | `WHERE b."Id" = ANY (@p)` — identical shape all sizes |
-| `{1, null}` vs `N` | `WHERE b."N" = ANY (@p) OR (b."N" IS NULL AND array_position(@p, NULL) IS NOT NULL)` (array keeps `NULL`; runtime check) |
-| `!{1, null}` vs `N` | `WHERE NOT (b."N" = ANY (@p) AND b."N" = ANY (@p) IS NOT NULL) AND (b."N" IS NOT NULL OR array_position(@p, NULL) IS NULL)` |
-| `{1, 2}` (`List<int?>`, no nulls) vs `N` | same `OR (… array_position …)` shape (type-based decision — branch present despite no null values) |
-| `{1, null}` vs `Id` | `WHERE b."Id" = ANY (@p)` (no branch — non-null column) |
-| `{null}` vs `N` | same `OR (… array_position …)` shape over `{ NULL }` |
+| 3 / 5000 `List<int>` ids vs `Id` | `WHERE b."Id" IN (1, 2, …)` — inline constants at EVERY size, never `ANY` |
+| 2-elem `List<int?>` no-nulls vs `N` | `WHERE b."N" IN (1, 2)` — inline constants |
+| 5000-elem `List<int?>` no-nulls vs `N` | `WHERE b."N" = ANY (@bigNoNull) OR (b."N" IS NULL AND array_position(@bigNoNull, NULL) IS NOT NULL)` (array param despite no null values at runtime — nullable element type + size) |
+| `{1, null}` vs `N` | `WHERE b."N" = ANY (@pgNull) OR (b."N" IS NULL AND array_position(@pgNull, NULL) IS NOT NULL)` (array keeps `NULL`; runtime check) |
+| `!{1, null}` vs `N` | `WHERE b."N" IS NOT NULL AND b."N" <> 1` (small negation scalarizes to `<>` + branch, constants) |
+| `{1, null}` vs `Id` | `WHERE b."Id" = ANY (@pgNull)` (array keeps `NULL`, harmless; no branch — non-null column) |
+| 5000+null vs `N` | `= ANY` + `OR (… array_position …)` over the kept-`NULL` array (same shape as no-nulls 5000) |
+| `{null}` vs `N` | same `OR (… array_position …)` shape over `{ NULL }` (S0) |
 
 **C# expressibility constraint (compile-time, verified):** `List<int>.Contains(int? member)` does not compile, so nulls-in-list ⇒ nullable element type; an `IS NULL` branch additionally requires a nullable column. The PK-filter scenario (`List<int>` vs non-nullable key) can never contain nulls.
