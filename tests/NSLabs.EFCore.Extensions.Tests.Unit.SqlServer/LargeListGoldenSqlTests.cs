@@ -200,6 +200,27 @@ public class LargeListGoldenSqlTests
     }
 
     [Fact]
+    public void Upsert_guard_large_in_uses_aliased_openjson()
+    {
+        var codes = Enumerable.Range(0, 150).Select(i => $"C{i}").ToList();
+        var chunks = Harness.Generate(b => b
+            .Upsert<Customer>(u => u
+                .MatchOn(x => x.Code)
+                .UpdateWhen(x => codes.Contains(x.Code))
+                .Insert(new Customer { Code = "A", Name = "X" })));
+
+        Assert.Single(chunks);
+        var sql = chunks[0].CommandText;
+        Assert.Contains("MERGE INTO", sql);
+        Assert.Contains("[t].[Code] IN (SELECT [v].[Value] FROM OPENJSON(@p", sql);
+        Assert.Contains("WITH ([Value] nvarchar(max) '$')", sql);
+
+        var payload = chunks[0].Parameters.Single(v => v.Value is string s && s.StartsWith('[')).Value as string;
+        Assert.NotNull(payload);
+        Assert.Equal(codes, JsonSerializer.Deserialize<List<string>>(payload));
+    }
+
+    [Fact]
     public void Delete_with_5000_ids_is_one_chunk_one_param()
     {
         var ids = Enumerable.Range(1, 5000).ToList();

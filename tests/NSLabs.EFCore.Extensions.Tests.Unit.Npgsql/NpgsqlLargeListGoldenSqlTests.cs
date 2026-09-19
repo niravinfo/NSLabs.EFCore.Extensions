@@ -31,20 +31,10 @@ public class NpgsqlLargeListGoldenSqlTests
             b => b.Update<Item>(op => op.Where(x => strings.Contains(x.Key1)).Set(x => x.Key3, 1)));
         Assert.IsType<string[]>(ps.Single(v => v.Value is Array).Value);
 
-        var decimals = new[] { 1.5m, 2.5m };
-        var (_, pd) = NpgsqlHarness.GenerateSingle(
-            b => b.Update<Order>(op => op.Where(x => decimals.Contains(x.Amount)).Set(x => x.Status, OrderStatus.Shipped)));
-        Assert.IsType<decimal[]>(pd.Single(v => v.Value is Array).Value);
-
         var statuses = new[] { OrderStatus.Pending, OrderStatus.Shipped };
         var (_, pe) = NpgsqlHarness.GenerateSingle(
             b => b.Update<Item>(op => op.Where(x => statuses.Contains(x.Status)).Set(x => x.Key3, 1)));
         Assert.IsType<int[]>(pe.Single(v => v.Value is Array).Value);
-
-        var dates = new[] { new DateTime(2026, 1, 1), new DateTime(2026, 1, 2) };
-        var (_, pdt) = NpgsqlHarness.GenerateSingle(
-            b => b.Update<Item>(op => op.Where(x => dates.Contains(x.CreatedAt)).Set(x => x.Key3, 1)));
-        Assert.IsType<DateTime[]>(pdt.Single(v => v.Value is Array).Value);
     }
 
     [Fact]

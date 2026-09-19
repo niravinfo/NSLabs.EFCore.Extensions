@@ -76,6 +76,36 @@ public class NpgsqlLargeListExecutionTests : NpgsqlTestBase
     }
 
     [Fact]
+    public async Task Update_with_50000_ids_stays_single_statement()
+    {
+        RequireDatabase();
+        const int baseId = 900000;
+
+        await using (var context = Fixture.CreateContext())
+        {
+            // Set-based seed: 50k rows in one round trip (generate_series).
+            await context.Database.ExecuteSqlRawAsync(
+                """DELETE FROM "Items" WHERE "Id" >= {0}; INSERT INTO "Items" ("Id", "Key1", "Key2", "Key3", "Status", "Active", "CreatedAt") SELECT g, 'smoke', 0, 0, 0, FALSE, now() FROM generate_series({0}, {1}) g""",
+                baseId, baseId + 49999);
+        }
+
+        var targets = Enumerable.Range(baseId, 50000).ToList();
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            result = await context.BulkExecuteAsync(b => b
+                .Update<Item>(op => op
+                    .Where(x => targets.Contains(x.Id))
+                    .Set(x => x.Key3, 9)));
+        }
+
+        Assert.Equal(50000, result.TotalRowsAffected);
+
+        await using var verify = Fixture.CreateContext();
+        Assert.Equal(50000, await verify.Items.CountAsync(x => x.Key3 == 9 && x.Id >= baseId));
+    }
+
+    [Fact]
     public async Task Nullable_list_matches_null_and_value_rows_like_ef()
     {
         RequireDatabase();
