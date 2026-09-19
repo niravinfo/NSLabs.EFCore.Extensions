@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
-// PostgreSQL dialect for large `IN` lists (LARGE_LIST_SUPPORT_PLAN.md §4.3).
+// PostgreSQL dialect for large `IN` lists (docs/DESIGN.md "Large IN lists").
 // Provider-local by design: the core assembly carries no provider dialect, so the
 // typed-array builder lives here, in the Npgsql package, next to its generator.
 // Shared neutral plumbing (null partition/count, byte[] detection) lives in the

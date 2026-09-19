@@ -3,7 +3,7 @@ using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
-// SQL Server dialect for large `IN` lists (LARGE_LIST_SUPPORT_PLAN.md §4.2).
+// SQL Server dialect for large `IN` lists (docs/DESIGN.md "Large IN lists").
 // Provider-local by design: the core assembly carries no provider dialect, so the
 // OPENJSON WITH-type map lives here, in the SqlServer package, next to its
 // generator. Shared neutral plumbing (null partition, decision rule, JSON payload)

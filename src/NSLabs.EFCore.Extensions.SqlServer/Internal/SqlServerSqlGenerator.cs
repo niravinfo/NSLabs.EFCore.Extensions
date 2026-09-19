@@ -9,7 +9,7 @@ internal static class SqlServerSqlGenerator
 
     private const string SourceAlias = "s";
 
-    // Large-IN mark (LARGE_LIST_SUPPORT_PLAN.md §3): lists above this many non-null
+    // Large-IN mark (docs/DESIGN.md "Large IN lists"): lists above this many non-null
     // values use the single-param OPENJSON path. Internal const in v1 — no public option.
     internal const int LargeListThreshold = 100;
 

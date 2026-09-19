@@ -256,6 +256,34 @@ FROM Items i JOIN #ops o ON i.Key1 = o.M_Key1 AND i.Key2 = o.M_Key2;
 Constant parameter count regardless of op count. Requires temp-table DDL permissions.
 Opt-in mode only.
 
+### Large `IN` lists (all providers)
+
+Large `Contains` filters collapse to one parameter instead of one-per-value
+(5000 ids = 1 param, never throws): SQL Server `OPENJSON` above 100 non-null
+values, PostgreSQL always `= ANY` (typed array), SQLite `json_each` above 50.
+Thresholds are judgment marks (shared 2000-param chunks vs single queries);
+correctness never depends on them — an overflow backstop flips every flippable
+`IN` when the op would exceed budget.
+
+Nulls (EF10-exact): strip from every payload; branch iff `hasNull && columnNullable`
+(`(FAST OR col IS NULL)`; negated `NOT FAST AND col IS NOT NULL`, or
+`NOT FAST OR col IS NULL` when null-free); drop silently vs non-null columns;
+all-null → `IS NULL`/`IS NOT NULL` (0 params); empty → `1=0`/`1=1`.
+Negation distributes (`SqlNotNode(SqlInNode)` only — never a `NOT (…)` wrapper);
+`OR`-expansions are parenthesized (parts AND-join bare).
+
+Counting contract: fast = 1, slow = non-null count, empty/all-null = 0.
+Counter and emitter recompute the same pure rule, so plans and params agree by
+construction. Core carries no provider dialect (standing rule): neutral plumbing
+in core `LargeListHelper`, dialect beside each generator (`SqlServerLargeList`,
+`NpgsqlLargeList`; SQLite needs none beyond SQL text).
+
+Deliberate EF10 deviations (all result-identical): parameterized `IN (@p…)`
+small (never inline constants — injection-proof + countable budgets); always
+`WITH` when the converted type is exactly known, untyped `OPENJSON` fallback
+otherwise (`WITH` describes the converted domain — converter-aware); no padding;
+own `@pN` naming; `byte[]`-element lists stay multi-param in v1.
+
 ### Upsert Generation
 
 Grouped by (conflict-target shape, guard shape):

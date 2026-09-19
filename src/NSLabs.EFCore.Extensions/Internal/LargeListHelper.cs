@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace NSLabs.EFCore.Extensions.Internal;
 
 // Shared, provider-neutral building blocks for large `IN`-list support
-// (LARGE_LIST_SUPPORT_PLAN.md §4.1). This file must never contain provider
+// (docs/DESIGN.md "Large IN lists"). This file must never contain provider
 // dialect — no OPENJSON/ANY/json_each text, no WITH types, no per-provider
 // thresholds. Each provider owns its dialect next to its generator and calls
 // into these pure functions. Counting and emission use identical inputs, so
