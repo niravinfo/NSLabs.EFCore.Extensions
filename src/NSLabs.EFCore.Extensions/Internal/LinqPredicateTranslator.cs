@@ -239,7 +239,7 @@ internal static class LinqPredicateTranslator
             {
                 var collectionExpr = UnwrapImplicit(call.Object);
                 var itemExpr = call.Arguments[0];
-                if (!ReferencesEntity(collectionExpr, entityParameter) && ReferencesEntity(itemExpr, entityParameter) && itemExpr is MemberExpression { Expression: ParameterExpression } im && im.Expression == entityParameter)
+                if (!ReferencesEntity(collectionExpr, entityParameter) && ReferencesEntity(itemExpr, entityParameter) && UnwrapItemMember(itemExpr, entityParameter) is { } im)
                 {
                     var prop = ResolveProperty(im, entityType);
                     var collection = Evaluate(collectionExpr) as System.Collections.IEnumerable;
@@ -255,7 +255,7 @@ internal static class LinqPredicateTranslator
             {
                 var sourceExpr = UnwrapImplicit(call.Arguments[0]);
                 var itemExpr = call.Arguments[1];
-                if (!ReferencesEntity(sourceExpr, entityParameter) && ReferencesEntity(itemExpr, entityParameter) && itemExpr is MemberExpression { Expression: ParameterExpression } im2 && im2.Expression == entityParameter)
+                if (!ReferencesEntity(sourceExpr, entityParameter) && ReferencesEntity(itemExpr, entityParameter) && UnwrapItemMember(itemExpr, entityParameter) is { } im2)
                 {
                     var prop = ResolveProperty(im2, entityType);
                     var collection = Evaluate(sourceExpr) as System.Collections.IEnumerable;
@@ -274,6 +274,27 @@ internal static class LinqPredicateTranslator
         }
 
         throw new NotSupportedException($"Method '{call.Method.DeclaringType?.Name}.{call.Method.Name}' is not supported in predicates. Supported: string.Contains/StartsWith/EndsWith/Equals, string.IsNullOrEmpty/IsNullOrWhiteSpace, collection.Contains (IN), EF.Functions.Like.");
+    }
+
+    // The Contains item side is a bare member access in the common case, but a nullable
+    // element type against a non-nullable column (List<int?> vs int PK) compiles to
+    // Convert(x.Member) — a lifted no-op the translator must see through so the
+    // §4.1 null-drop rule for non-nullable columns is reachable. The reverse
+    // (List<int> vs int? member) does not compile, so no other shape can occur.
+    private static MemberExpression? UnwrapItemMember(Expression expression, ParameterExpression entityParameter)
+    {
+        while (expression is UnaryExpression
+               {
+                   NodeType: ExpressionType.Convert or ExpressionType.ConvertChecked
+               } convert)
+        {
+            expression = convert.Operand;
+        }
+
+        return expression is MemberExpression { Expression: ParameterExpression } member
+               && ReferenceEquals(member.Expression, entityParameter)
+            ? member
+            : null;
     }
 
     private static string EscapeLike(string pattern)

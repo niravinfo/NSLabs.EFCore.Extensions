@@ -9,6 +9,10 @@ internal static class SqlServerSqlGenerator
 
     private const string SourceAlias = "s";
 
+    // Large-IN mark (LARGE_LIST_SUPPORT_PLAN.md §3): lists above this many non-null
+    // values use the single-param OPENJSON path. Internal const in v1 — no public option.
+    internal const int LargeListThreshold = 100;
+
     public static IReadOnlyList<SqlChunkPlan> Generate(IReadOnlyList<BoundOperation> operations, int maxParametersPerCommand, int sqlServerCompatibilityLevel = 150)
     {
         ArgumentNullException.ThrowIfNull(operations);
@@ -28,7 +32,9 @@ internal static class SqlServerSqlGenerator
                 continue;
             }
 
-            var cost = CountParameters(operation);
+            // Fast-aware cost: large IN lists collapse to 1 param before the budget check.
+            var opOverBudget = LargeListHelper.SlowOpTotal(operation) > maxParametersPerCommand;
+            var cost = CountDecidedTotal(operation, opOverBudget);
 
             if (cost > maxParametersPerCommand)
             {
@@ -43,7 +49,7 @@ internal static class SqlServerSqlGenerator
                 pendingParamCount = 0;
             }
 
-            pending.Add(new PendingUnit(operation, 0, 0));
+            pending.Add(new PendingUnit(operation, 0, 0, opOverBudget, GuardOverBudget: false));
             pendingParamCount += cost;
         }
 
@@ -75,19 +81,24 @@ internal static class SqlServerSqlGenerator
 
         if (spec.Rows.Count == 0)
         {
-            pending.Add(new PendingUnit(operation, 0, 0));
+            pending.Add(new PendingUnit(operation, 0, 0, OpOverBudget: false, GuardOverBudget: false));
             return;
         }
 
+        var perRowCost = spec.InsertColumns.Count;
+
+        // Fast-aware guard cost (§4.1): the guard's IN nodes decide against the
+        // worst-case single-row unit total, so a large-IN guard collapses to 1 param here.
+        var guardOverBudget =
+            LargeListHelper.SlowGuardUnitTotal(spec.Guard, operation.Assignments, perRowCost) > maxParametersPerCommand;
+
         // EF Core pattern: manual loop vs LINQ Sum — avoids enumerator alloc in hot ExpandUpsert
-        var fixedCost = CountParameterNodes(spec.Guard);
+        var fixedCost = CountDecidedNode(spec.Guard, guardOverBudget);
         for (var i = 0; i < operation.Assignments.Count; i++)
         {
             var assignment = operation.Assignments[i];
-            fixedCost += assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1;
+            fixedCost += assignment.ValueExpression is not null ? CountDecidedNode(assignment.ValueExpression, guardOverBudget) : 1;
         }
-
-        var perRowCost = spec.InsertColumns.Count;
 
         if (fixedCost + perRowCost > maxParametersPerCommand)
         {
@@ -107,7 +118,7 @@ internal static class SqlServerSqlGenerator
             }
 
             var rowCount = Math.Min(spec.Rows.Count - startRow, capacity);
-            pending.Add(new PendingUnit(operation, startRow, rowCount));
+            pending.Add(new PendingUnit(operation, startRow, rowCount, guardOverBudget, guardOverBudget));
             pendingParamCount += fixedCost + rowCount * perRowCost;
             startRow += rowCount;
 
@@ -154,6 +165,8 @@ internal static class SqlServerSqlGenerator
 
         foreach (var unit in units)
         {
+            emitter.BeginOperation(unit.OpOverBudget, unit.GuardOverBudget);
+
             if (unit.Operation.Kind == BulkOperationKind.Upsert && unit.RowCount == 0)
             {
                 sql.Append("SET @rc").Append(unit.Operation.GlobalIndex).AppendLine(" = 0;");
@@ -309,7 +322,7 @@ internal static class SqlServerSqlGenerator
 
             if (spec.Guard is { } guard)
             {
-                sql.Append(" AND ").Append(emitter.Emit(guard, entityType, TargetAlias));
+                sql.Append(" AND ").Append(emitter.EmitGuard(guard, entityType, TargetAlias));
             }
 
             sql.Append(" THEN UPDATE SET ");
@@ -387,50 +400,52 @@ internal static class SqlServerSqlGenerator
         return sb.ToString();
     }
 
-    private static int CountParameters(BoundOperation operation)
+    // Fast-aware total: IN nodes cost 1 on the fast path, nonNullCount otherwise
+    // (shared LargeListHelper rule — same pure rule the emitter uses, so plans and params agree).
+    private static int CountDecidedTotal(BoundOperation operation, bool opOverBudget)
     {
         // EF Core pattern: manual loop vs LINQ Sum
         var count = 0;
         for (var i = 0; i < operation.Assignments.Count; i++)
         {
             var assignment = operation.Assignments[i];
-            count += assignment.ValueExpression is not null ? CountParameterNodes(assignment.ValueExpression) : 1;
+            count += assignment.ValueExpression is not null ? CountDecidedNode(assignment.ValueExpression, opOverBudget) : 1;
         }
 
         foreach (var part in operation.PredicateParts)
         {
-            count += CountParameterNodes(part);
+            count += CountDecidedNode(part, opOverBudget);
         }
 
         return count;
     }
 
-    private static int CountParameterNodes(SqlNode? node) => node switch
+    private static int CountDecidedNode(SqlNode? node, bool opOverBudget) => node switch
     {
         null => 0,
         SqlParameterNode => 1,
-        SqlBinaryNode binary => CountParameterNodes(binary.Left) + CountParameterNodes(binary.Right),
-        SqlNotNode not => CountParameterNodes(not.Inner),
-        SqlUnaryNode unary => CountParameterNodes(unary.Inner),
-        SqlConditionalNode cond => CountParameterNodes(cond.Test) + CountParameterNodes(cond.IfTrue) + CountParameterNodes(cond.IfFalse),
-        SqlCoalesceNode co => CountParameterNodes(co.Left) + CountParameterNodes(co.Right),
-        SqlMethodCallNode method => CountMethodArgs(method),
+        SqlBinaryNode binary => CountDecidedNode(binary.Left, opOverBudget) + CountDecidedNode(binary.Right, opOverBudget),
+        SqlNotNode not => CountDecidedNode(not.Inner, opOverBudget),
+        SqlUnaryNode unary => CountDecidedNode(unary.Inner, opOverBudget),
+        SqlConditionalNode cond => CountDecidedNode(cond.Test, opOverBudget) + CountDecidedNode(cond.IfTrue, opOverBudget) + CountDecidedNode(cond.IfFalse, opOverBudget),
+        SqlCoalesceNode co => CountDecidedNode(co.Left, opOverBudget) + CountDecidedNode(co.Right, opOverBudget),
+        SqlMethodCallNode method => CountDecidedMethodArgs(method, opOverBudget),
         SqlColumnNode => 0,
         SqlBooleanNode => 0,
         SqlNullCheckNode => 0,
         SqlLikeNode => 1,
-        SqlInNode inNode => inNode.Values.Count,
+        SqlInNode inNode => LargeListHelper.DecidedInCost(inNode, LargeListThreshold, opOverBudget),
         SqlIsEmptyNode => 0,
         _ => 0
     };
 
-    private static int CountMethodArgs(SqlMethodCallNode method)
+    private static int CountDecidedMethodArgs(SqlMethodCallNode method, bool opOverBudget)
     {
         // EF Core pattern: manual loop vs LINQ Sum
         var sum = 0;
         for (var i = 0; i < method.Args.Count; i++)
         {
-            sum += CountParameterNodes(method.Args[i]);
+            sum += CountDecidedNode(method.Args[i], opOverBudget);
         }
 
         return sum;
@@ -447,7 +462,16 @@ internal static class SqlServerSqlGenerator
         return "[" + identifier.Replace("]", "]]") + "]";
     }
 
-    private readonly record struct PendingUnit(BoundOperation Operation, int StartRow, int RowCount);
+    // OpOverBudget/GuardOverBudget ride along so the emitter reuses the exact decisions
+    // counting made (pure functions of the same inputs — agreement by construction).
+    // For upsert units both flags carry the guard-unit decision; assignments never
+    // contain IN nodes, so either flag would agree for them.
+    private readonly record struct PendingUnit(
+        BoundOperation Operation,
+        int StartRow,
+        int RowCount,
+        bool OpOverBudget,
+        bool GuardOverBudget);
 
     private sealed class ParameterEmitter
     {
@@ -459,10 +483,38 @@ internal static class SqlServerSqlGenerator
 
         private int Counter { get; set; }
 
+        // Per-operation IN decision flags (set by BeginOperation per emitted op).
+        // _inGuard selects the guard-unit flag while a MERGE guard is emitting.
+        private bool _opOverBudget;
+
+        private bool _guardOverBudget;
+
+        private bool _inGuard;
+
         public ParameterEmitter(int capacity = 8, int compatibilityLevel = 150)
         {
             _parameters = new List<SqlParam>(capacity);
             _compatibilityLevel = compatibilityLevel;
+        }
+
+        public void BeginOperation(bool opOverBudget, bool guardOverBudget)
+        {
+            _opOverBudget = opOverBudget;
+            _guardOverBudget = guardOverBudget;
+            _inGuard = false;
+        }
+
+        public string EmitGuard(SqlNode node, IEntityType entityType, string? alias)
+        {
+            _inGuard = true;
+            try
+            {
+                return Emit(node, entityType, alias);
+            }
+            finally
+            {
+                _inGuard = false;
+            }
         }
 
         public string Emit(SqlNode node, IEntityType entityType, string? alias = null) => node switch
@@ -472,7 +524,7 @@ internal static class SqlServerSqlGenerator
             SqlParameterNode parameter => EmitValue(parameter.Value),
             SqlNullCheckNode nullCheck =>
                 $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType))} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}",
-            SqlNotNode not => $"NOT ({Emit(not.Inner, entityType, alias)})",
+            SqlNotNode not => EmitNot(not, entityType, alias),
             SqlUnaryNode unary => EmitUnary(unary, entityType, alias),
             SqlConditionalNode cond => $"CASE WHEN {Emit(cond.Test, entityType, alias)} THEN {Emit(cond.IfTrue, entityType, alias)} ELSE {Emit(cond.IfFalse, entityType, alias)} END",
             SqlCoalesceNode co => $"COALESCE({Emit(co.Left, entityType, alias)}, {Emit(co.Right, entityType, alias)})",
@@ -618,25 +670,109 @@ internal static class SqlServerSqlGenerator
             return StringBuilderCache.GetStringAndRelease(sb);
         }
 
-        private string EmitIn(SqlInNode inNode, IEntityType entityType, string? alias)
+        // Negation of a bare Contains distributes per EF10 (§4.1) instead of wrapping
+        // in NOT (...): the wrapper is wrong for nullable columns in both directions.
+        // Only a NOT whose direct inner is an IN distributes; deeper NOTs keep the wrapper.
+        private string EmitNot(SqlNotNode not, IEntityType entityType, string? alias)
         {
-            if (inNode.Values.Count == 0)
+            if (not.Inner is SqlInNode inNode)
             {
-                return inNode.Negated ? "1=1" : "1=0";
+                return EmitInNegated(inNode, entityType, alias);
             }
 
-            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(inNode.Property, entityType))}";
-            var op = inNode.Negated ? "NOT IN" : "IN";
-            // EF Core pattern: manual loop vs string.Join+Select — avoids enumerator alloc for IN lists
-            var sb = new StringBuilder();
-            sb.Append(col).Append(' ').Append(op).Append(" (");
-            for (var i = 0; i < inNode.Values.Count; i++)
+            return $"NOT ({Emit(not.Inner, entityType, alias)})";
+        }
+
+        private bool UseFastIn(SqlInNode inNode, int nonNullCount)
+        {
+            var flippable = !LargeListHelper.IsByteArrayElementList(inNode.Values);
+            var opOverBudget = _inGuard ? _guardOverBudget : _opOverBudget;
+            return LargeListHelper.UseFastInPath(nonNullCount, flippable, LargeListThreshold, opOverBudget);
+        }
+
+        private string EmitIn(SqlInNode inNode, IEntityType entityType, string? alias)
+        {
+            // The translator never sets SqlInNode.Negated (negation arrives as SqlNotNode);
+            // honor it anyway so both spellings agree.
+            if (inNode.Negated)
             {
-                if (i > 0) sb.Append(", ");
-                sb.Append(EmitValue(inNode.Values[i]));
+                return EmitInNegated(inNode, entityType, alias);
             }
-            sb.Append(')');
-            return sb.ToString();
+
+            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
+            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(inNode.Property, entityType))}";
+
+            if (nonNulls.Count == 0)
+            {
+                return hasNull ? $"{col} IS NULL" : "1=0";
+            }
+
+            // OR-expansions are parenthesized: predicate parts are AND-joined bare,
+            // so a bare "... OR ... IS NULL" would misbind to its neighbors.
+            var nullBranch = hasNull && inNode.Property.IsNullable ? $" OR {col} IS NULL" : "";
+
+            if (!UseFastIn(inNode, nonNulls.Count))
+            {
+                // EF Core pattern: manual loop vs string.Join+Select — avoids enumerator alloc for IN lists
+                var sb = new StringBuilder();
+                sb.Append(col).Append(" IN (");
+                for (var i = 0; i < nonNulls.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(EmitValue(nonNulls[i]));
+                }
+
+                sb.Append(')');
+                var slow = sb.ToString();
+                return nullBranch.Length == 0 ? slow : $"({slow}{nullBranch})";
+            }
+
+            var json = LargeListHelper.BuildJsonArray(nonNulls);
+            var param = EmitValue(json);
+            var withType = SqlServerLargeList.OpenJsonWithType(inNode.Property, nonNulls);
+            var fast = $"{col} IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])";
+            return nullBranch.Length == 0 ? fast : $"({fast}{nullBranch})";
+        }
+
+        private string EmitInNegated(SqlInNode inNode, IEntityType entityType, string? alias)
+        {
+            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
+            var col = $"{WithAlias(alias)}{Quote(ModelBinder.GetColumnName(inNode.Property, entityType))}";
+
+            if (nonNulls.Count == 0)
+            {
+                return hasNull ? $"{col} IS NOT NULL" : "1=1";
+            }
+
+            string core;
+            if (!UseFastIn(inNode, nonNulls.Count))
+            {
+                var sb = new StringBuilder();
+                sb.Append(col).Append(" NOT IN (");
+                for (var i = 0; i < nonNulls.Count; i++)
+                {
+                    if (i > 0) sb.Append(", ");
+                    sb.Append(EmitValue(nonNulls[i]));
+                }
+
+                sb.Append(')');
+                core = sb.ToString();
+            }
+            else
+            {
+                var json = LargeListHelper.BuildJsonArray(nonNulls);
+                var param = EmitValue(json);
+                var withType = SqlServerLargeList.OpenJsonWithType(inNode.Property, nonNulls);
+                core = $"{col} NOT IN (SELECT [v].[Value] FROM OPENJSON({param}) WITH ([Value] {withType} '$') AS [v])";
+            }
+
+            if (hasNull && inNode.Property.IsNullable)
+            {
+                return $"{core} AND {col} IS NOT NULL";
+            }
+
+            // OR-expansion: parenthesize (see EmitIn).
+            return inNode.Property.IsNullable ? $"({core} OR {col} IS NULL)" : core;
         }
 
         private string EmitIsEmpty(SqlIsEmptyNode empty, IEntityType entityType, string? alias)
