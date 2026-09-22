@@ -1,0 +1,73 @@
+name: Benchmarks
+
+# Manual-only: benchmarks are noisy and slow, so they never run on push/PR.
+# Compare results across runs from this same workflow (same runner image);
+# do not compare against local Windows runs.
+on:
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: "BenchmarkDotNet --filter (e.g. *EntityRowMatch* or *Predicate*)"
+        required: false
+        default: "*"
+      job:
+        description: "BenchmarkDotNet job (Dry = smoke, Short = CI A/B, Default = thorough)"
+        type: choice
+        required: true
+        default: Short
+        options:
+          - Dry
+          - Short
+          - Default
+
+# Queue runs — parallel benchmark jobs would skew timings.
+concurrency:
+  group: benchmarks
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj
+
+      - name: Build (Release)
+        run: dotnet build benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj --no-restore --configuration Release
+
+      # Inputs flow through env vars to avoid shell injection via --filter.
+      - name: Run benchmarks
+        env:
+          BDN_FILTER: ${{ inputs.filter }}
+          BDN_JOB: ${{ inputs.job }}
+        run: >
+          dotnet run
+          --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
+          --configuration Release
+          --no-build
+          --
+          --filter "$BDN_FILTER"
+          --job "$BDN_JOB"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: BenchmarkDotNet.Artifacts/
+          if-no-files-found: warn
+          retention-days: 90
