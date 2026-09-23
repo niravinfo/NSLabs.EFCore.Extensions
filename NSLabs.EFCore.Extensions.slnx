@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/NSLabs.EFCore.Extensions.Samples.Shared/NSLabs.EFCore.Extensions.Samples.Shared.csproj" />
     <Project Path="samples/NSLabs.EFCore.Extensions.Samples.SqlServer/NSLabs.EFCore.Extensions.Samples.SqlServer.csproj" />

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- BenchmarkDotNet hosts require an entry point. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>NSLabs.EFCore.Extensions.Benchmarks</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions\NSLabs.EFCore.Extensions.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions.SqlServer\NSLabs.EFCore.Extensions.SqlServer.csproj" />
+    <ProjectReference Include="..\..\src\NSLabs.EFCore.Extensions.Sqlite\NSLabs.EFCore.Extensions.Sqlite.csproj" />
+  </ItemGroup>
+
+</Project>
