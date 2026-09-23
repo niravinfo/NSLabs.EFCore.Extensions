@@ -66,4 +66,7 @@ Pass-through BenchmarkDotNet options (e.g. `--memory`, exporters, jobs) work aft
 2. Apply the change.
 3. Re-run the **same** filter/job and compare Mean / Allocated columns.
 
+The pre-optimization Short-job baseline (2026-09-23, captured before P2) is checked in as
+[`BASELINE.md`](BASELINE.md) — compare new workflow runs against that file.
+
 CI (`build.yml`) only compile-checks this project; the `benchmarks.yml` workflow is the only place it executes.
