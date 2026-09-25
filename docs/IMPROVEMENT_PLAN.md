@@ -12,7 +12,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 | # | Item | Category | Priority | Effort | Status |
 |---|------|----------|----------|--------|--------|
 | P1 | Benchmark suite (BenchmarkDotNet) | Performance | Critical | Medium | DONE |
-| P2 | Cache expression compilation in translators | Performance | Critical | Medium | IN PROGRESS |
+| P2 | Cache expression compilation in translators | Performance | Critical | Medium | DONE |
 | P3 | Fast path for entity-style match updates | Performance | High | Medium | TODO |
 | P4 | StringBuilder-direct SQL emission | Performance | High | Large | TODO |
 | P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | TODO |
@@ -138,7 +138,7 @@ benchmarks/
 - Benchmarks (P1) show reduced bind time and allocations for repeated predicate/SET shapes.
 - Cache is bounded or keyed on stable expression identity (no unbounded growth per `DbContext` model rebuild — note the existing caveat on `ModelBinder` static caches).
 
-**Depends on:** P1 (to measure). Status: IN PROGRESS — `ExpressionEvaluatorCache` implemented (getter + operator + comparer caches; `ConditionalWeakTable` compile fallback); unit + Sqlite integration green; post-change benchmark vs `benchmarks/BASELINE.md` pending.
+**Depends on:** P1 (to measure). Status: DONE — `ExpressionEvaluatorCache` (getter + operator + comparer caches; `ConditionalWeakTable` compile fallback); tests green; A/B on same hardware (EPYC 7763, `benchmarks/Baseline_New.md` vs `benchmarks/New_Improvements.md`): captured-subexpression SET bind **37–50× faster / −57% alloc**, closure compile fallback **54–76× faster / −64% alloc**, no regressions anywhere else.
 
 ---
 
