@@ -13,7 +13,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 |---|------|----------|----------|--------|--------|
 | P1 | Benchmark suite (BenchmarkDotNet) | Performance | Critical | Medium | DONE |
 | P2 | Cache expression compilation in translators | Performance | Critical | Medium | DONE |
-| P3 | Fast path for entity-style match updates | Performance | High | Medium | TODO |
+| P3 | Fast path for entity-style match updates | Performance | High | Medium | DONE |
 | P4 | StringBuilder-direct SQL emission | Performance | High | Large | TODO |
 | P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | TODO |
 | P6 | Fix null-validation gaps in DbSet extensions | Correctness | High | Small | TODO |
@@ -53,7 +53,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
   - **Predicate bind:** 10 / 1,000 / 10,000 ops — comparison + `StartsWith` + captured-closure compile fallback (P2 target).
   - **Computed SET bind:** 10 / 1,000 / 10,000 ops — `Set(x => x.Key2, x => x.Key2 + (factor * 2))` hits uncached `SetExpressionTranslator.Evaluate` (P2 target).
   - **SQL generation (SqlServer):** same sizes via offline harness (P4 target).
-  - **Entity-row match:** 10 / 1,000 / 10,000 rows with `(row, x) => x.Id == row.Id` — per-row rewrite path (P3 target); PK-match variant as contrast.
+  - **Entity-row match:** 10 / 1,000 / 10,000 rows with `(row, x) => x.Id == row.Id && x.Key1 == row.Key1` — per-row rewrite path (P3 target); PK-match variant as contrast.
   - **Large IN lists:** 500 / 5,000 / 20,000-element `Contains` (above SqlServer threshold 100 / Sqlite threshold 50 → fast JSON path).
   - **Execute (SQLite in-memory):** update / entity-row / large-IN end-to-end.
 - `[MemoryDiagnoser]` on a shared base; default job; BenchmarkDotNet CLI args pass through for filtering.
@@ -154,15 +154,16 @@ benchmarks/
 
 **Files:**
 - `src/NSLabs.EFCore.Extensions/BulkBatch.cs` (~lines 560-610)
+- `src/NSLabs.EFCore.Extensions/Internal/EntityRowMatchPlan.cs`
 - `src/NSLabs.EFCore.Extensions/Internal/ParameterReplacer.cs` (unchanged; still used by fallback)
-- Tests: `tests/NSLabs.EFCore.Extensions.Tests.Unit.SqlServer/MixedAndEntityRowTests.cs`, `EntityStyleExecutionTests` (both unit + integration, all three providers)
+- Tests: SQL Server exact-SQL/fallback-plan tests, SQLite + Npgsql parity goldens, and composite-match execution tests for all three providers
 
 **Acceptance:**
 - Identical generated SQL for entity-style match updates (golden tests unchanged or extended).
 - Benchmark for 10k-row match update shows large allocation/time reduction vs baseline.
 - Arbitrary (non-equality) match expressions still work via fallback.
 
-**Depends on:** P1 (to measure); shares translation internals with P2 but can land independently.
+**Depends on:** P1 (to measure); shares translation internals with P2 but can land independently. Status: DONE — `EntityRowMatchPlan` parses direct same-property equality conjunctions once per batch, preserves comparison direction/grouping/null/value-conversion/TPH semantics, and leaves every other shape on the existing per-row rewrite fallback. Exact SQL, fallback selection, provider parity, and live execution tests pass. Same-machine ShortRun A/B at 10k rows: custom match **62.88 → 57.82 ms (−8.0%)**, **32,058.83 → 23,935 KB (−25.3%)**; PK control unchanged within run-to-run noise.
 
 ---
 

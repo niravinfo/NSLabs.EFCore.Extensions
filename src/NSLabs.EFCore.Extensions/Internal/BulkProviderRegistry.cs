@@ -1,8 +1,12 @@
+using System.Collections.Concurrent;
+
 namespace NSLabs.EFCore.Extensions.Internal;
 
 internal static class BulkProviderRegistry
 {
-    private static readonly Dictionary<string, IBulkProvider> _providers = new(StringComparer.Ordinal);
+    // P5: ConcurrentDictionary — Register and the Resolve reflection fallback both mutate
+    // this from arbitrary threads; a plain Dictionary could corrupt under concurrent first-use.
+    private static readonly ConcurrentDictionary<string, IBulkProvider> _providers = new(StringComparer.Ordinal);
 
     // Table-driven well-known providers: EF provider name -> provider implementation
     // (assembly-qualified type name). Adding a new database = one line here.
@@ -28,13 +32,20 @@ internal static class BulkProviderRegistry
 
         // Fallback: try to load known provider via reflection (covers case where ModuleInitializer
         // hasn't run because assembly hasn't been touched yet, but is referenced).
+        // Double-check + GetOrAdd: the dictionary is only mutated with a successful instance
+        // (failed TryLoad is not cached, preserving retry semantics); losers of the race
+        // discard their instance and use the winner's.
         if (providerName is not null && KnownProviders.TryGetValue(providerName, out var typeName))
         {
+            if (_providers.TryGetValue(providerName, out var raced))
+            {
+                return raced;
+            }
+
             var loaded = TryLoad(typeName);
             if (loaded is not null)
             {
-                _providers[providerName] = loaded;
-                return loaded;
+                return _providers.GetOrAdd(providerName, loaded);
             }
         }
 

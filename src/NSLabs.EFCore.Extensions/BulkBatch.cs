@@ -584,6 +584,7 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
         }
 
         var bindableProperties = bindableList.ToArray();
+        var matchPlan = match is null ? null : EntityRowMatchPlan.TryCreate(match, entityType);
 
         foreach (var row in materialized)
         {
@@ -598,6 +599,10 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                         new SqlColumnNode(keyProperty),
                         new SqlParameterNode(ModelBinder.ConvertToProvider(keyProperty, ModelBinder.ReadMemberValue(keyProperty, row!)))));
                 }
+            }
+            else if (matchPlan is not null)
+            {
+                operation.PredicateParts.Add(matchPlan.Bind(row!));
             }
             else
             {

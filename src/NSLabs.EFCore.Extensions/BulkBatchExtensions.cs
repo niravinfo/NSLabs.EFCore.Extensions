@@ -39,6 +39,11 @@ public static class BulkBatchExtensions
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(build);
+        ArgumentNullException.ThrowIfNull(options);
+
+        // P7: validate options before the user callback runs — argument validation must
+        // never be observed after user code has already executed (.NET ordering convention).
+        options.Validate();
 
         var batch = new BulkBatch(context);
         build(batch);
@@ -50,6 +55,8 @@ public static class BulkBatchExtensions
         Action<TableUpdateBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpdateBuilder<TEntity>(batch));
         return batch.ExecuteAsync(cancellationToken);
@@ -66,6 +73,10 @@ public static class BulkBatchExtensions
         BulkExecuteOptions options,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpdateBuilder<TEntity>(batch));
         return batch.ExecuteAsync(options, cancellationToken);
@@ -76,6 +87,8 @@ public static class BulkBatchExtensions
         Action<TableUpsertBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpsertBuilder<TEntity>(batch));
         return batch.ExecuteAsync(cancellationToken);
@@ -92,13 +105,17 @@ public static class BulkBatchExtensions
         BulkExecuteOptions options,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+        ArgumentNullException.ThrowIfNull(options);
+        options.Validate();
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpsertBuilder<TEntity>(batch));
         return batch.ExecuteAsync(options, cancellationToken);
     }
 
     private static DbContext GetContext<TEntity>(DbSet<TEntity> set) where TEntity : class
-        => ((IInfrastructure<IServiceProvider>)set).Instance.GetRequiredService<ICurrentDbContext>().Context;
+        => ((IInfrastructure<IServiceProvider>)set ?? throw new ArgumentNullException(nameof(set))).Instance.GetRequiredService<ICurrentDbContext>().Context;
 }
 
 public sealed class TableUpdateBuilder<TEntity> where TEntity : class

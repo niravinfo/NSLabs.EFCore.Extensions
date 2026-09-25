@@ -93,4 +93,155 @@ public class MixedAndEntityRowTests
         Assert.Equal(false, p["@p4"]);
         Assert.Equal("B", p["@p7"]);
     }
+
+    [Fact]
+    public void Entity_rows_with_grouped_custom_match_preserve_tree_shape_and_operand_order()
+    {
+        var row = new Item
+        {
+            Id = 5,
+            Key1 = "a",
+            Key2 = 1,
+            Key3 = 2,
+            Status = OrderStatus.Pending,
+            Active = true,
+            ParentId = null,
+            CreatedAt = new DateTime(2099, 1, 1)
+        };
+
+        var (rightGroupedSql, rightGroupedParameters) = Harness.GenerateSingle(b => b.Update<Item>(
+            [row],
+            (matchRow, x) => x.Id == matchRow.Id && (matchRow.Key1 == x.Key1 && x.Key2 == matchRow.Key2)));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Items] SET [Active] = @p0, [Key1] = @p1, [Key2] = @p2, [Key3] = @p3, [ParentId] = @p4, [Status] = @p5 " +
+            "WHERE ([Id] = @p6 AND (@p7 = [Key1] AND [Key2] = @p8)); " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            rightGroupedSql);
+
+        var rightGrouped = Harness.Params(rightGroupedParameters);
+        Assert.Equal(5, rightGrouped["@p6"]);
+        Assert.Equal("a", rightGrouped["@p7"]);
+        Assert.Equal(1, rightGrouped["@p8"]);
+
+        var (leftGroupedSql, _) = Harness.GenerateSingle(b => b.Update<Item>(
+            [row],
+            (matchRow, x) => (x.Id == matchRow.Id && matchRow.Key1 == x.Key1) && x.Key2 == matchRow.Key2));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Items] SET [Active] = @p0, [Key1] = @p1, [Key2] = @p2, [Key3] = @p3, [ParentId] = @p4, [Status] = @p5 " +
+            "WHERE (([Id] = @p6 AND @p7 = [Key1]) AND [Key2] = @p8); " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            leftGroupedSql);
+    }
+
+    [Fact]
+    public void Entity_rows_with_null_custom_match_emit_null_check_without_parameter()
+    {
+        var row = new Item
+        {
+            Id = 5,
+            Key1 = "a",
+            Key2 = 1,
+            Key3 = 2,
+            Status = OrderStatus.Pending,
+            Active = true,
+            ParentId = null,
+            CreatedAt = new DateTime(2099, 1, 1)
+        };
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b.Update<Item>(
+            [row],
+            (matchRow, x) => x.Id == matchRow.Id && x.ParentId == matchRow.ParentId));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Items] SET [Active] = @p0, [Key1] = @p1, [Key2] = @p2, [Key3] = @p3, [ParentId] = @p4, [Status] = @p5 " +
+            "WHERE ([Id] = @p6 AND [ParentId] IS NULL); " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            sql);
+        Assert.Equal(7, parameters.Count);
+        Assert.Equal(5, Harness.Params(parameters)["@p6"]);
+        Assert.DoesNotContain(parameters, parameter => parameter.Name == "@p7");
+    }
+
+    [Fact]
+    public void Entity_rows_with_relational_custom_match_use_general_fallback_semantics()
+    {
+        var row = new Item
+        {
+            Id = 5,
+            Key1 = "a",
+            Key2 = 1,
+            Key3 = 2,
+            Status = OrderStatus.Pending,
+            Active = true,
+            ParentId = null,
+            CreatedAt = new DateTime(2099, 1, 1)
+        };
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b.Update<Item>(
+            [row],
+            (matchRow, x) => x.Id == matchRow.Id && x.Key2 > matchRow.Key2));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Items] SET [Active] = @p0, [Key1] = @p1, [Key2] = @p2, [Key3] = @p3, [ParentId] = @p4, [Status] = @p5 " +
+            "WHERE ([Id] = @p6 AND [Key2] > @p7); " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            sql);
+
+        var p = Harness.Params(parameters);
+        Assert.Equal(5, p["@p6"]);
+        Assert.Equal(1, p["@p7"]);
+    }
+
+    [Fact]
+    public void Entity_rows_with_or_custom_match_preserve_general_fallback_grouping()
+    {
+        var row = new Customer { Id = 100, Code = "A", Name = "X", Active = true };
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b.Update<Customer>(
+            [row],
+            (matchRow, x) => x.Code == matchRow.Code || x.Name == matchRow.Name));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Customers] SET [Active] = @p0, [Code] = @p1, [Name] = @p2 WHERE ([Code] = @p3 OR [Name] = @p4); " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            sql);
+
+        var p = Harness.Params(parameters);
+        Assert.Equal("A", p["@p3"]);
+        Assert.Equal("X", p["@p4"]);
+    }
+
+    [Fact]
+    public void Entity_rows_with_custom_match_retain_tph_discriminator()
+    {
+        var row = new Cat { PetId = 7, Name = "Milo", LivesLeft = 8 };
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b.Update<Cat>(
+            [row],
+            (matchRow, x) => x.Name == matchRow.Name));
+
+        Assert.Equal(
+            "DECLARE @rc0 int; " +
+            "UPDATE [Pets] SET [Name] = @p0, [LivesLeft] = @p1 WHERE [Name] = @p2 AND [PetType] = @p3; " +
+            "SET @rc0 = @@ROWCOUNT; " +
+            "SELECT @rc0 AS Op0;",
+            sql);
+
+        var p = Harness.Params(parameters);
+        Assert.Equal("Milo", p["@p0"]);
+        Assert.Equal("Milo", p["@p2"]);
+        Assert.Equal("Cat", p["@p3"]);
+    }
 }
