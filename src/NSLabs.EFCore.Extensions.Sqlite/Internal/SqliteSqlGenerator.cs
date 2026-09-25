@@ -102,12 +102,13 @@ internal static class SqliteSqlGenerator
         {
             EmitStatement(emitter, sb, operation);
             sb.Append(';');
-            return new SqlChunkPlan
+            var plan = new SqlChunkPlan
             {
                 CommandText = StringBuilderCache.GetStringAndRelease(sb),
                 Parameters = emitter.Parameters,
                 OperationIndices = [operation.GlobalIndex]
             };
+            return plan;
         }
         catch
         {
@@ -128,12 +129,13 @@ internal static class SqliteSqlGenerator
         {
             EmitInsertOnConflict(emitter, sb, operation, startRow, rowCount);
             sb.Append(';');
-            return new SqlChunkPlan
+            var plan = new SqlChunkPlan
             {
                 CommandText = StringBuilderCache.GetStringAndRelease(sb),
                 Parameters = emitter.Parameters,
                 OperationIndices = [operation.GlobalIndex]
             };
+            return plan;
         }
         catch
         {
@@ -145,12 +147,13 @@ internal static class SqliteSqlGenerator
     private static SqlChunkPlan BuildZeroRowUpsertChunk(BoundOperation operation)
     {
         // No SQL to execute; executor will treat as 0 affected.
-        return new SqlChunkPlan
+        var plan = new SqlChunkPlan
         {
             CommandText = "-- zero-row upsert no-op",
             Parameters = [],
             OperationIndices = [operation.GlobalIndex]
         };
+        return plan;
     }
 
     private static void EmitStatement(ParameterEmitter emitter, StringBuilder sql, BoundOperation operation)
@@ -168,10 +171,16 @@ internal static class SqliteSqlGenerator
                     if (i > 0) sql.Append(", ");
                     var assignment = operation.Assignments[i];
                     sql.Append(Quote(ModelBinder.GetColumnName(assignment.Property, operation.EntityType)))
-                       .Append(" = ")
-                       .Append(assignment.ValueExpression is not null
-                           ? emitter.Emit(assignment.ValueExpression, operation.EntityType)
-                           : emitter.EmitValue(assignment.Value));
+                       .Append(" = ");
+
+                    if (assignment.ValueExpression is not null)
+                    {
+                        emitter.Emit(sql, assignment.ValueExpression, operation.EntityType);
+                    }
+                    else
+                    {
+                        emitter.EmitValue(sql, assignment.Value);
+                    }
                 }
                 break;
 
@@ -183,7 +192,8 @@ internal static class SqliteSqlGenerator
                 throw new NotSupportedException($"Operation kind '{operation.Kind}' cannot be emitted as a simple statement.");
         }
 
-        sql.Append(" WHERE ").Append(EmitPredicate(emitter, operation));
+        sql.Append(" WHERE ");
+        EmitPredicate(emitter, sql, operation);
     }
 
     private static void EmitInsertOnConflict(ParameterEmitter emitter, StringBuilder sql, BoundOperation operation, int startRow, int rowCount)
@@ -208,7 +218,7 @@ internal static class SqliteSqlGenerator
             for (var c = 0; c < row.InsertValues.Count; c++)
             {
                 if (c > 0) sql.Append(", ");
-                sql.Append(emitter.EmitValue(row.InsertValues[c].Value));
+                emitter.EmitValue(sql, row.InsertValues[c].Value);
             }
             sql.Append(')');
         }
@@ -237,10 +247,16 @@ internal static class SqliteSqlGenerator
                 if (i > 0) sql.Append(", ");
                 var assignment = operation.Assignments[i];
                 sql.Append(Quote(ModelBinder.GetColumnName(assignment.Property, entityType)))
-                   .Append(" = ")
-                   .Append(assignment.ValueExpression is not null
-                       ? emitter.Emit(assignment.ValueExpression, entityType)
-                       : emitter.EmitValue(assignment.Value));
+                   .Append(" = ");
+
+                if (assignment.ValueExpression is not null)
+                {
+                    emitter.Emit(sql, assignment.ValueExpression, entityType);
+                }
+                else
+                {
+                    emitter.EmitValue(sql, assignment.Value);
+                }
             }
         }
         else
@@ -255,25 +271,27 @@ internal static class SqliteSqlGenerator
 
         if (spec.Guard is { } guard)
         {
-            sql.Append(" WHERE ").Append(emitter.EmitGuard(guard, entityType));
+            sql.Append(" WHERE ");
+            emitter.EmitGuard(sql, guard, entityType);
         }
     }
 
-    private static string EmitPredicate(ParameterEmitter emitter, BoundOperation operation)
+    private static void EmitPredicate(ParameterEmitter emitter, StringBuilder sql, BoundOperation operation)
     {
         if (operation.PredicateParts.Count == 0)
             throw new InvalidOperationException($"Operation #{operation.GlobalIndex} on '{operation.EntityType.DisplayName()}' has no predicate; refusing to emit unbounded DML.");
 
         if (operation.PredicateParts.Count == 1)
-            return emitter.Emit(operation.PredicateParts[0], operation.EntityType);
+        {
+            emitter.Emit(sql, operation.PredicateParts[0], operation.EntityType);
+            return;
+        }
 
-        var sb = new StringBuilder(64);
         for (var i = 0; i < operation.PredicateParts.Count; i++)
         {
-            if (i > 0) sb.Append(" AND ");
-            sb.Append(emitter.Emit(operation.PredicateParts[i], operation.EntityType));
+            if (i > 0) sql.Append(" AND ");
+            emitter.Emit(sql, operation.PredicateParts[i], operation.EntityType);
         }
-        return sb.ToString();
     }
 
     // Fast-aware total: IN nodes cost 1 on the fast path, nonNullCount otherwise
@@ -363,12 +381,12 @@ internal static class SqliteSqlGenerator
             _inGuard = false;
         }
 
-        public string EmitGuard(SqlNode node, IEntityType entityType)
+        public void EmitGuard(StringBuilder sql, SqlNode node, IEntityType entityType)
         {
             _inGuard = true;
             try
             {
-                return Emit(node, entityType);
+                Emit(sql, node, entityType);
             }
             finally
             {
@@ -376,31 +394,102 @@ internal static class SqliteSqlGenerator
             }
         }
 
-        public string Emit(SqlNode node, IEntityType entityType, string? alias = null) => node switch
+        // P4: direct emission — every branch appends into the chunk's StringBuilder instead of
+        // building an intermediate expression string. Emission order is unchanged, so parameter
+        // numbering (@p0, @p1, ...) and generated SQL stay byte-identical.
+        public void Emit(StringBuilder sql, SqlNode node, IEntityType entityType, string? alias = null)
         {
-            SqlColumnNode column => Quote(ModelBinder.GetColumnName(column.Property, entityType)),
-            SqlBooleanNode boolean => $"{Quote(ModelBinder.GetColumnName(boolean.Property, entityType))} = 1",
-            SqlParameterNode parameter => EmitValue(parameter.Value),
-            SqlNullCheckNode nullCheck => $"{Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType))} {(nullCheck.IsNotNull ? "IS NOT NULL" : "IS NULL")}",
-            SqlNotNode not => EmitNot(not, entityType, alias),
-            SqlUnaryNode unary => EmitUnary(unary, entityType, alias),
-            SqlConditionalNode cond => $"CASE WHEN {Emit(cond.Test, entityType, alias)} THEN {Emit(cond.IfTrue, entityType, alias)} ELSE {Emit(cond.IfFalse, entityType, alias)} END",
-            SqlCoalesceNode co => $"COALESCE({Emit(co.Left, entityType, alias)}, {Emit(co.Right, entityType, alias)})",
-            SqlMethodCallNode method => EmitMethod(method, entityType, alias),
-            SqlLikeNode like => EmitLike(like, entityType, alias),
-            SqlInNode inNode => EmitIn(inNode, entityType, alias),
-            SqlIsEmptyNode empty => EmitIsEmpty(empty, entityType, alias),
-            SqlBinaryNode { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical => $"({Emit(logical.Left, entityType, alias)} {(logical.Operator == SqlBinaryOperator.And ? "AND" : "OR")} {Emit(logical.Right, entityType, alias)})",
-            SqlBinaryNode arithmetic when IsArithmetic(arithmetic.Operator) => EmitArithmetic(arithmetic, entityType, alias),
-            SqlBinaryNode comparison => $"{Emit(comparison.Left, entityType, alias)} {RenderComparison(comparison.Operator)} {Emit(comparison.Right, entityType, alias)}",
-            _ => throw new NotSupportedException($"Cannot emit node '{node.GetType().Name}'.")
-        };
+            switch (node)
+            {
+                case SqlColumnNode column:
+                    sql.Append(Quote(ModelBinder.GetColumnName(column.Property, entityType)));
+                    break;
 
-        public string EmitValue(object? value)
+                case SqlBooleanNode boolean:
+                    sql.Append(Quote(ModelBinder.GetColumnName(boolean.Property, entityType))).Append(" = 1");
+                    break;
+
+                case SqlParameterNode parameter:
+                    EmitValue(sql, parameter.Value);
+                    break;
+
+                case SqlNullCheckNode nullCheck:
+                    sql.Append(Quote(ModelBinder.GetColumnName(nullCheck.Property, entityType)))
+                        .Append(nullCheck.IsNotNull ? " IS NOT NULL" : " IS NULL");
+                    break;
+
+                case SqlNotNode not:
+                    EmitNot(sql, not, entityType, alias);
+                    break;
+
+                case SqlUnaryNode unary:
+                    EmitUnary(sql, unary, entityType, alias);
+                    break;
+
+                case SqlConditionalNode cond:
+                    sql.Append("CASE WHEN ");
+                    Emit(sql, cond.Test, entityType, alias);
+                    sql.Append(" THEN ");
+                    Emit(sql, cond.IfTrue, entityType, alias);
+                    sql.Append(" ELSE ");
+                    Emit(sql, cond.IfFalse, entityType, alias);
+                    sql.Append(" END");
+                    break;
+
+                case SqlCoalesceNode co:
+                    sql.Append("COALESCE(");
+                    Emit(sql, co.Left, entityType, alias);
+                    sql.Append(", ");
+                    Emit(sql, co.Right, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case SqlMethodCallNode method:
+                    EmitMethod(sql, method, entityType, alias);
+                    break;
+
+                case SqlLikeNode like:
+                    EmitLike(sql, like, entityType, alias);
+                    break;
+
+                case SqlInNode inNode:
+                    EmitIn(sql, inNode, entityType, alias);
+                    break;
+
+                case SqlIsEmptyNode empty:
+                    EmitIsEmpty(sql, empty, entityType, alias);
+                    break;
+
+                case SqlBinaryNode { Operator: SqlBinaryOperator.And or SqlBinaryOperator.Or } logical:
+                    sql.Append('(');
+                    Emit(sql, logical.Left, entityType, alias);
+                    sql.Append(logical.Operator == SqlBinaryOperator.And ? " AND " : " OR ");
+                    Emit(sql, logical.Right, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case SqlBinaryNode arithmetic when IsArithmetic(arithmetic.Operator):
+                    EmitArithmetic(sql, arithmetic, entityType, alias);
+                    break;
+
+                case SqlBinaryNode comparison:
+                    Emit(sql, comparison.Left, entityType, alias);
+                    sql.Append(' ').Append(RenderComparison(comparison.Operator)).Append(' ');
+                    Emit(sql, comparison.Right, entityType, alias);
+                    break;
+
+                default:
+                    throw new NotSupportedException($"Cannot emit node '{node.GetType().Name}'.");
+            }
+        }
+
+        public void EmitValue(StringBuilder sql, object? value)
         {
+            // The name string is still required by the returned SqlParam; only the surrounding
+            // intermediate expression strings are gone.
             var name = $"@p{Counter++}";
             _parameters.Add(new SqlParam(name, value));
-            return name;
+            sql.Append(name);
         }
 
         private static bool IsArithmetic(SqlBinaryOperator op) => op is SqlBinaryOperator.Add or SqlBinaryOperator.Subtract or SqlBinaryOperator.Multiply or SqlBinaryOperator.Divide or SqlBinaryOperator.Modulo;
@@ -426,14 +515,24 @@ internal static class SqliteSqlGenerator
             _ => throw new NotSupportedException($"Operator '{op}' is not an arithmetic operator.")
         };
 
-        private string EmitArithmetic(SqlBinaryNode node, IEntityType entityType, string? alias)
+        private void EmitArithmetic(StringBuilder sql, SqlBinaryNode node, IEntityType entityType, string? alias)
         {
             // String concat uses || in SQLite
-            if (node.Operator == SqlBinaryOperator.Add && IsStringConcat(node, entityType))
+            var stringConcat = node.Operator == SqlBinaryOperator.Add && IsStringConcat(node, entityType);
+
+            sql.Append('(');
+            Emit(sql, node.Left, entityType, alias);
+            if (stringConcat)
             {
-                return $"({Emit(node.Left, entityType, alias)} || {Emit(node.Right, entityType, alias)})";
+                sql.Append(" || ");
             }
-            return $"({Emit(node.Left, entityType, alias)} {RenderArithmetic(node.Operator)} {Emit(node.Right, entityType, alias)})";
+            else
+            {
+                sql.Append(' ').Append(RenderArithmetic(node.Operator)).Append(' ');
+            }
+
+            Emit(sql, node.Right, entityType, alias);
+            sql.Append(')');
         }
 
         private static bool IsStringConcat(SqlBinaryNode node, IEntityType entityType)
@@ -447,73 +546,186 @@ internal static class SqliteSqlGenerator
             return false;
         }
 
-        private string EmitUnary(SqlUnaryNode unary, IEntityType entityType, string? alias) => unary.Operator switch
+        private void EmitUnary(StringBuilder sql, SqlUnaryNode unary, IEntityType entityType, string? alias)
         {
-            SqlUnaryOperator.Negate => $"-{Emit(unary.Inner, entityType, alias)}",
-            _ => throw new NotSupportedException($"Unary operator '{unary.Operator}' is not supported.")
-        };
-
-        private string EmitMethod(SqlMethodCallNode method, IEntityType entityType, string? alias)
-        {
-            switch (method.Method)
+            switch (unary.Operator)
             {
-                case "UPPER": return $"UPPER({Emit(method.Args[0], entityType, alias)})";
-                case "LOWER": return $"LOWER({Emit(method.Args[0], entityType, alias)})";
-                case "TRIM": return $"TRIM({Emit(method.Args[0], entityType, alias)})";
-                case "LTRIM": return $"LTRIM({Emit(method.Args[0], entityType, alias)})";
-                case "RTRIM": return $"RTRIM({Emit(method.Args[0], entityType, alias)})";
-                case "LEN": return $"LENGTH({Emit(method.Args[0], entityType, alias)})";
-                case "SUBSTRING":
-                    // SUBSTR(col, start, len) — SQLite
-                    if (method.Args.Count == 3)
-                        return $"SUBSTR({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
-                    return $"SUBSTR({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
-                case "REPLACE": return $"REPLACE({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)}, {Emit(method.Args[2], entityType, alias)})";
-                case "CONCAT":
-                {
-                    if (method.Args.Count == 0) return "''";
-                    if (method.Args.Count == 1) return Emit(method.Args[0], entityType, alias);
-                    var sb = StringBuilderCache.Acquire(32);
-                    try
-                    {
-                        sb.Append('(');
-                        for (var i = 0; i < method.Args.Count; i++)
-                        {
-                            if (i > 0) sb.Append(" || ");
-                            sb.Append(Emit(method.Args[i], entityType, alias));
-                        }
-                        sb.Append(')');
-                        return StringBuilderCache.GetStringAndRelease(sb);
-                    }
-                    catch
-                    {
-                        StringBuilderCache.Release(sb);
-                        throw;
-                    }
-                }
-                case "ABS": return $"ABS({Emit(method.Args[0], entityType, alias)})";
-                case "CEILING": return $"CEIL({Emit(method.Args[0], entityType, alias)})";
-                case "FLOOR": return $"FLOOR({Emit(method.Args[0], entityType, alias)})";
-                case "ROUND" when method.Args.Count == 1: return $"ROUND({Emit(method.Args[0], entityType, alias)})";
-                case "ROUND" when method.Args.Count == 2: return $"ROUND({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
-                case "ROUND" when method.Args.Count == 3:
-                    // SQLite has no 3-arg ROUND for truncate; emulate via CAST truncation
-                    // ROUND(x,0,1) in SQL Server means truncate; we emit CAST(x AS INTEGER)
-                    return $"CAST({Emit(method.Args[0], entityType, alias)} AS INTEGER)";
-                case "LEAST" when method.Args.Count == 2: return $"MIN({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
-                case "GREATEST" when method.Args.Count == 2: return $"MAX({Emit(method.Args[0], entityType, alias)}, {Emit(method.Args[1], entityType, alias)})";
-                default: throw new NotSupportedException($"Method '{method.Method}' is not supported for SQLite generation.");
+                case SqlUnaryOperator.Negate:
+                    sql.Append('-');
+                    Emit(sql, unary.Inner, entityType, alias);
+                    break;
+
+                default:
+                    throw new NotSupportedException($"Unary operator '{unary.Operator}' is not supported.");
             }
         }
 
-        private string EmitLike(SqlLikeNode like, IEntityType entityType, string? alias)
+        // Emits the argument at a fixed position (extra arguments are ignored, a missing one
+        // throws the same index exception the string-returning emitter threw) — matches the
+        // pre-P4 fixed-arity emission exactly.
+        private void EmitArg(StringBuilder sql, SqlMethodCallNode method, int index, IEntityType entityType, string? alias)
+            => Emit(sql, method.Args[index], entityType, alias);
+
+        // Emits every argument joined with ", " — for arities already pinned by a `when` guard.
+        private void EmitArgs(StringBuilder sql, SqlMethodCallNode method, IEntityType entityType, string? alias)
         {
-            var col = Quote(ModelBinder.GetColumnName(like.Property, entityType));
+            for (var i = 0; i < method.Args.Count; i++)
+            {
+                if (i > 0) sql.Append(", ");
+                Emit(sql, method.Args[i], entityType, alias);
+            }
+        }
+
+        private void EmitMethod(StringBuilder sql, SqlMethodCallNode method, IEntityType entityType, string? alias)
+        {
+            switch (method.Method)
+            {
+                case "UPPER":
+                    sql.Append("UPPER(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "LOWER":
+                    sql.Append("LOWER(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "TRIM":
+                    sql.Append("TRIM(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "LTRIM":
+                    sql.Append("LTRIM(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "RTRIM":
+                    sql.Append("RTRIM(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "LEN":
+                    sql.Append("LENGTH(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "SUBSTRING":
+                    // SUBSTR(col, start, len) — SQLite. Two arguments when the count is not 3,
+                    // exactly like the pre-P4 emitter (including its index-out-of-range failure).
+                    sql.Append("SUBSTR(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(", ");
+                    EmitArg(sql, method, 1, entityType, alias);
+                    if (method.Args.Count == 3)
+                    {
+                        sql.Append(", ");
+                        EmitArg(sql, method, 2, entityType, alias);
+                    }
+
+                    sql.Append(')');
+                    break;
+
+                case "REPLACE":
+                    sql.Append("REPLACE(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(", ");
+                    EmitArg(sql, method, 1, entityType, alias);
+                    sql.Append(", ");
+                    EmitArg(sql, method, 2, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "CONCAT":
+                {
+                    if (method.Args.Count == 0)
+                    {
+                        sql.Append("''");
+                        break;
+                    }
+
+                    if (method.Args.Count == 1)
+                    {
+                        Emit(sql, method.Args[0], entityType, alias);
+                        break;
+                    }
+
+                    sql.Append('(');
+                    for (var i = 0; i < method.Args.Count; i++)
+                    {
+                        if (i > 0) sql.Append(" || ");
+                        Emit(sql, method.Args[i], entityType, alias);
+                    }
+
+                    sql.Append(')');
+                    break;
+                }
+
+                case "ABS":
+                    sql.Append("ABS(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "CEILING":
+                    sql.Append("CEIL(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "FLOOR":
+                    sql.Append("FLOOR(");
+                    EmitArg(sql, method, 0, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "ROUND" when method.Args.Count == 1:
+                case "ROUND" when method.Args.Count == 2:
+                    sql.Append("ROUND(");
+                    EmitArgs(sql, method, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "ROUND" when method.Args.Count == 3:
+                    // SQLite has no 3-arg ROUND for truncate; emulate via CAST truncation
+                    // ROUND(x,0,1) in SQL Server means truncate; we emit CAST(x AS INTEGER)
+                    sql.Append("CAST(");
+                    Emit(sql, method.Args[0], entityType, alias);
+                    sql.Append(" AS INTEGER)");
+                    break;
+
+                case "LEAST" when method.Args.Count == 2:
+                    sql.Append("MIN(");
+                    EmitArgs(sql, method, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                case "GREATEST" when method.Args.Count == 2:
+                    sql.Append("MAX(");
+                    EmitArgs(sql, method, entityType, alias);
+                    sql.Append(')');
+                    break;
+
+                default:
+                    throw new NotSupportedException($"Method '{method.Method}' is not supported for SQLite generation.");
+            }
+        }
+
+        private void EmitLike(StringBuilder sql, SqlLikeNode like, IEntityType entityType, string? alias)
+        {
+            sql.Append(Quote(ModelBinder.GetColumnName(like.Property, entityType)));
+
             var raw = like.PatternValue as string ?? throw new NotSupportedException("LIKE pattern must be a string.");
             var finalPattern = BuildLikePattern(raw, like.Kind);
-            var param = EmitValue(finalPattern);
-            var op = like.Negated ? "NOT LIKE" : "LIKE";
-            return $"{col} {op} {param} ESCAPE '\\'";
+            sql.Append(like.Negated ? " NOT LIKE " : " LIKE ");
+            EmitValue(sql, finalPattern);
+            sql.Append(" ESCAPE '\\'");
         }
 
         private static string BuildLikePattern(string raw, SqlLikeKind kind) => kind switch
@@ -544,14 +756,17 @@ internal static class SqliteSqlGenerator
         // Negation of a bare Contains distributes per EF10 (§4.1) instead of wrapping
         // in NOT (...): the wrapper is wrong for nullable columns in both directions.
         // Only a NOT whose direct inner is an IN distributes; deeper NOTs keep the wrapper.
-        private string EmitNot(SqlNotNode not, IEntityType entityType, string? alias)
+        private void EmitNot(StringBuilder sql, SqlNotNode not, IEntityType entityType, string? alias)
         {
             if (not.Inner is SqlInNode inNode)
             {
-                return EmitInNegated(inNode, entityType, alias);
+                EmitInNegated(sql, inNode, entityType, alias);
+                return;
             }
 
-            return $"NOT ({Emit(not.Inner, entityType, alias)})";
+            sql.Append("NOT (");
+            Emit(sql, not.Inner, entityType, alias);
+            sql.Append(')');
         }
 
         private bool UseFastIn(SqlInNode inNode, int nonNullCount)
@@ -561,13 +776,14 @@ internal static class SqliteSqlGenerator
             return LargeListHelper.UseFastInPath(nonNullCount, flippable, LargeListThreshold, opOverBudget);
         }
 
-        private string EmitIn(SqlInNode inNode, IEntityType entityType, string? alias)
+        private void EmitIn(StringBuilder sql, SqlInNode inNode, IEntityType entityType, string? alias)
         {
             // The translator never sets SqlInNode.Negated (negation arrives as SqlNotNode);
             // honor it anyway so both spellings agree.
             if (inNode.Negated)
             {
-                return EmitInNegated(inNode, entityType, alias);
+                EmitInNegated(sql, inNode, entityType, alias);
+                return;
             }
 
             var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
@@ -575,93 +791,119 @@ internal static class SqliteSqlGenerator
 
             if (nonNulls.Count == 0)
             {
-                return hasNull ? $"{col} IS NULL" : "1=0";
+                if (hasNull)
+                {
+                    sql.Append(col).Append(" IS NULL");
+                }
+                else
+                {
+                    sql.Append("1=0");
+                }
+
+                return;
             }
 
             // OR-expansions are parenthesized: predicate parts are AND-joined bare,
-            // so a bare "... OR ... IS NULL" would misbind to its neighbors.
-            var nullBranch = hasNull && inNode.Property.IsNullable ? $" OR {col} IS NULL" : "";
+            // so a bare "... OR ... IS NULL" would misbind to its neighbors. The opening
+            // paren is written before the core because the destination is the final buffer.
+            var parenthesize = hasNull && inNode.Property.IsNullable;
+            if (parenthesize)
+            {
+                sql.Append('(');
+            }
 
             if (!UseFastIn(inNode, nonNulls.Count))
             {
-                var sb = StringBuilderCache.Acquire(32);
-                try
+                sql.Append(col).Append(" IN (");
+                for (var i = 0; i < nonNulls.Count; i++)
                 {
-                    sb.Append(col).Append(" IN (");
-                    for (var i = 0; i < nonNulls.Count; i++)
-                    {
-                        if (i > 0) sb.Append(", ");
-                        sb.Append(EmitValue(nonNulls[i]));
-                    }
-                    sb.Append(')');
-                    var slow = StringBuilderCache.GetStringAndRelease(sb);
-                    return nullBranch.Length == 0 ? slow : $"({slow}{nullBranch})";
+                    if (i > 0) sql.Append(", ");
+                    EmitValue(sql, nonNulls[i]);
                 }
-                catch
-                {
-                    StringBuilderCache.Release(sb);
-                    throw;
-                }
-            }
 
-            var json = LargeListHelper.BuildJsonArray(nonNulls);
-            var param = EmitValue(json);
-            var fast = $"{col} IN (SELECT \"i\".\"value\" FROM json_each({param}) AS \"i\")";
-            return nullBranch.Length == 0 ? fast : $"({fast}{nullBranch})";
-        }
-
-        private string EmitInNegated(SqlInNode inNode, IEntityType entityType, string? alias)
-        {
-            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
-            var col = Quote(ModelBinder.GetColumnName(inNode.Property, entityType));
-
-            if (nonNulls.Count == 0)
-            {
-                return hasNull ? $"{col} IS NOT NULL" : "1=1";
-            }
-
-            string core;
-            if (!UseFastIn(inNode, nonNulls.Count))
-            {
-                var sb = StringBuilderCache.Acquire(32);
-                try
-                {
-                    sb.Append(col).Append(" NOT IN (");
-                    for (var i = 0; i < nonNulls.Count; i++)
-                    {
-                        if (i > 0) sb.Append(", ");
-                        sb.Append(EmitValue(nonNulls[i]));
-                    }
-                    sb.Append(')');
-                    core = StringBuilderCache.GetStringAndRelease(sb);
-                }
-                catch
-                {
-                    StringBuilderCache.Release(sb);
-                    throw;
-                }
+                sql.Append(')');
             }
             else
             {
                 var json = LargeListHelper.BuildJsonArray(nonNulls);
-                var param = EmitValue(json);
-                core = $"{col} NOT IN (SELECT \"i\".\"value\" FROM json_each({param}) AS \"i\")";
+                sql.Append(col).Append(" IN (SELECT \"i\".\"value\" FROM json_each(");
+                EmitValue(sql, json);
+                sql.Append(") AS \"i\")");
             }
 
-            if (hasNull && inNode.Property.IsNullable)
+            if (parenthesize)
             {
-                return $"{core} AND {col} IS NOT NULL";
+                sql.Append(" OR ").Append(col).Append(" IS NULL)");
             }
-
-            // OR-expansion: parenthesize (see EmitIn).
-            return inNode.Property.IsNullable ? $"({core} OR {col} IS NULL)" : core;
         }
 
-        private string EmitIsEmpty(SqlIsEmptyNode empty, IEntityType entityType, string? alias)
+        private void EmitInNegated(StringBuilder sql, SqlInNode inNode, IEntityType entityType, string? alias)
+        {
+            var (nonNulls, hasNull) = LargeListHelper.PartitionNulls(inNode.Values);
+            var col = Quote(ModelBinder.GetColumnName(inNode.Property, entityType));
+
+            if (nonNulls.Count == 0)
+            {
+                if (hasNull)
+                {
+                    sql.Append(col).Append(" IS NOT NULL");
+                }
+                else
+                {
+                    sql.Append("1=1");
+                }
+
+                return;
+            }
+
+            // Same leading-paren trick as EmitIn: the OR-expansion wraps the core,
+            // so its '(' has to land in the buffer before the core is emitted.
+            var andNullExpansion = hasNull && inNode.Property.IsNullable;
+            var orExpansion = !hasNull && inNode.Property.IsNullable;
+            if (orExpansion)
+            {
+                sql.Append('(');
+            }
+
+            if (!UseFastIn(inNode, nonNulls.Count))
+            {
+                sql.Append(col).Append(" NOT IN (");
+                for (var i = 0; i < nonNulls.Count; i++)
+                {
+                    if (i > 0) sql.Append(", ");
+                    EmitValue(sql, nonNulls[i]);
+                }
+
+                sql.Append(')');
+            }
+            else
+            {
+                var json = LargeListHelper.BuildJsonArray(nonNulls);
+                sql.Append(col).Append(" NOT IN (SELECT \"i\".\"value\" FROM json_each(");
+                EmitValue(sql, json);
+                sql.Append(") AS \"i\")");
+            }
+
+            if (andNullExpansion)
+            {
+                sql.Append(" AND ").Append(col).Append(" IS NOT NULL");
+            }
+            else if (orExpansion)
+            {
+                sql.Append(" OR ").Append(col).Append(" IS NULL)");
+            }
+        }
+
+        private void EmitIsEmpty(StringBuilder sql, SqlIsEmptyNode empty, IEntityType entityType, string? alias)
         {
             var col = Quote(ModelBinder.GetColumnName(empty.Property, entityType));
-            var check = $"({col} IS NULL OR {col} = '')";
-            return empty.Negated ? $"NOT {check}" : check;
+
+            if (empty.Negated)
+            {
+                sql.Append("NOT ");
+            }
+
+            sql.Append('(').Append(col).Append(" IS NULL OR ").Append(col).Append(" = '')");
         }
     }
 }

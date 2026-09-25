@@ -14,7 +14,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 | P1 | Benchmark suite (BenchmarkDotNet) | Performance | Critical | Medium | DONE |
 | P2 | Cache expression compilation in translators | Performance | Critical | Medium | DONE |
 | P3 | Fast path for entity-style match updates | Performance | High | Medium | TODO |
-| P4 | StringBuilder-direct SQL emission | Performance | High | Large | TODO |
+| P4 | StringBuilder-direct SQL emission | Performance | High | Large | DONE |
 | P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | TODO |
 | P6 | Fix null-validation gaps in DbSet extensions | Correctness | High | Small | TODO |
 | P7 | Validate options before user callback runs | Correctness | Medium | Small | TODO |
@@ -188,6 +188,8 @@ benchmarks/
 - Benchmarks show reduced allocations per chunk generation.
 
 **Depends on:** P1 (to measure). Larger refactor — do after P2/P3 for early wins.
+
+**Status:** DONE — all three generators changed from `string Emit(...)` to `void Emit(StringBuilder, ...)` appending into the pooled `StringBuilder` (no intermediate interpolated strings; `EmitPredicate` uses the chunk builder; CONCAT/IN paths no longer allocate nested builders; pooled builder released on success *and* exception paths). SQL text, `@p{n}` numbering, and all exception types/messages preserved — fixed-arity methods (`UPPER`/`SUBSTRING`/`REPLACE`/…) use positional arg emission to match legacy indexing exactly. Verified by a temporary snapshot harness: **535/535 generated chunk plans byte-for-byte identical** to the pre-change baseline (SQL text + parameter names/values/types), plus all 457 tests green across 6 projects; independent code review found no reachable divergence. Harness removed before landing. Allocation/time delta pending the CI benchmark run (P1 suite, `SqlGenerationBenchmarks`).
 
 ---
 
