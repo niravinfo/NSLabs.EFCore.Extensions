@@ -69,4 +69,8 @@ Pass-through BenchmarkDotNet options (e.g. `--memory`, exporters, jobs) work aft
 The pre-optimization Short-job baseline (2026-09-23, captured before P2) is checked in as
 [`BASELINE.md`](BASELINE.md) — compare new workflow runs against that file.
 
+The P2→P4 A/B chain (2026-09-25, all three runs on the same EPYC 7763 runner) is checked in as
+[`BASELINE_New.md`](BASELINE_New.md) (pre-P2; also fills the `PredicateTranslationBenchmarks` gap
+noted above) → [`After_P2.md`](After_P2.md) → [`After_P4.md`](After_P4.md).
+
 CI (`build.yml`) only compile-checks this project; the `benchmarks.yml` workflow is the only place it executes.
