@@ -595,6 +595,13 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
         var bindableProperties = bindableList.ToArray();
 
+        // Hoisted out of the per-row loop: resolves every mapped property through the EF
+        // model and fixes the And/Or tree exactly once. Null when the match expression is
+        // not a shape the plan models, in which case each row takes the rewrite below.
+        var matchPlan = match is null
+            ? null
+            : EntityRowMatchPlan.TryCreate(match, entityType, match.Parameters[0], match.Parameters[1]);
+
         foreach (var row in materialized)
         {
             var operation = CreateOperation(update ? BulkOperationKind.Update : BulkOperationKind.Delete, entityType);
@@ -608,6 +615,10 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
                         new SqlColumnNode(keyProperty),
                         new SqlParameterNode(ModelBinder.ConvertToProvider(keyProperty, ModelBinder.ReadMemberValue(keyProperty, row!)))));
                 }
+            }
+            else if (matchPlan is not null)
+            {
+                operation.PredicateParts.Add(matchPlan.Build(row!));
             }
             else
             {

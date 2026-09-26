@@ -424,7 +424,8 @@ internal static class LinqPredicateTranslator
     private static object? Evaluate(Expression expression)
         => ExpressionEvaluatorCache.Evaluate(expression);
 
-    private static SqlBinaryOperator ToOperator(ExpressionType type) => type switch
+    // Shared with EntityRowMatchPlan so the expression->operator mapping has one definition.
+    internal static SqlBinaryOperator ToOperator(ExpressionType type) => type switch
     {
         ExpressionType.Equal => SqlBinaryOperator.Equal,
         ExpressionType.NotEqual => SqlBinaryOperator.NotEqual,

@@ -13,7 +13,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 |---|------|----------|----------|--------|--------|
 | P1 | Benchmark suite (BenchmarkDotNet) | Performance | Critical | Medium | DONE |
 | P2 | Cache expression compilation in translators | Performance | Critical | Medium | DONE |
-| P3 | Fast path for entity-style match updates | Performance | High | Medium | TODO |
+| P3 | Fast path for entity-style match updates | Performance | High | Medium | DONE |
 | P4 | StringBuilder-direct SQL emission | Performance | High | Large | DONE |
 | P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | DONE |
 | P6 | Fix null-validation gaps in DbSet extensions | Correctness | High | Small | DONE |
@@ -163,6 +163,35 @@ benchmarks/
 - Arbitrary (non-equality) match expressions still work via fallback.
 
 **Depends on:** P1 (to measure); shares translation internals with P2 but can land independently.
+
+**Status:** DONE — landed as `EntityRowMatchPlan` (see below). Note the plan's original sketch ("build `SqlBinaryNode(Eq, column, parameter)` directly per row") would have produced silently wrong SQL; the implemented design differs and the reasoning is recorded in the next section.
+
+### P3 as implemented
+
+The dominant per-row cost was not the `SqlBinaryNode` allocation — it was that **every row redid work identical for every row**: an `ExpressionVisitor` traversal, a fresh constant and lambda, then a full `LinqPredicateTranslator` pass that re-resolved each mapped property through EF's `FindProperty`. At 10k rows x 2 columns that is 20,000 redundant model lookups.
+
+So `EntityRowMatchPlan` hoists *all* row-invariant work out of the loop, once per batch: properties are resolved to `IProperty` and the And/Or tree is fixed. Per row only the value is read, null-checked, converted and wrapped.
+
+**Three translator behaviors had to be respected** — the original sketch missed all three:
+1. `x.Prop == null` does **not** emit an equality; `TranslateBinary` returns `SqlNullCheckNode`. Whether that applies depends on the row's value, so it is the one branch that cannot be hoisted — it stays per-row, mirroring the translator exactly.
+2. Operand order is the user's (`row.Id == x.Id` emits `(param, column)`), and the emitted parameter order follows the tree. Recorded explicitly in the plan node.
+3. `ConvertedInTree` suppresses re-conversion. It is set only for a `Convert` wrapper, and the shape check rejects wrappers, so it is provably always false on the fast path.
+
+**Safety contract:** `TryCreate` returns `null` for every shape it does not fully model and the caller falls back to the original rewrite, so an unrecognised *or invalid* predicate still produces exactly what the translator produces — including its exceptions. The plan never reproduces a diagnostic, only a successful translation.
+
+**Verification:** `EntityRowMatchPlanTests` is a *differential* guard kept permanently (not a throwaway harness): it builds each row through both the plan and the original rewrite and compares the resulting `SqlNode` trees structurally across both operand orders, left-nested conjunctions, disjunction, relational operators, null/non-null/empty values, nullable columns and unmapped members. It earned its keep immediately — it caught a real defect where `x.Id == 5` passed the shape check and then threw `InvalidCastException`, because the check verified "not on the entity parameter" without verifying "on the row parameter". The pre-existing golden test `Entity_rows_with_custom_match_use_match_expression_per_row` and the container-backed integration tests pass unchanged, which is end-to-end proof through the real generator.
+
+**Documented coverage limit:** enum and other explicitly-converted comparisons are lowered by C# to `Equal(Convert(...), Convert(...))` and therefore decline the plan, falling back. `int`, `string`, `decimal`, `DateTime`, `bool` and `int?` all lower to a direct member and do get the fast path. Both facts are pinned by tests.
+
+**Measured (same-machine A/B, ShortRun, `EntityRowMatchBenchmarks`, custom-match path):**
+
+| Rows | Allocated before | after | Δ | Mean before | after |
+|------|------------------:|------:|--:|-----------:|------:|
+| 10 | 30.67 KB | 24.49 KB | −20.2% | 35.4 us | 32.9 us |
+| 1,000 | 2,868 KB | 2,228 KB | −22.3% | 4,333 us | 3,717 us |
+| 10,000 | 29,937 KB | 22,437 KB | −25.0% | 86.4 ms | 63.2 ms |
+
+The PK-match control was byte-identical (20.78 KB -> 20.78 KB; 20,212.63 -> 20,213.17 KB), confirming the untouched path did not move. Overhead over the PK path at 10k rows fell from 9,724 KB to 2,224 KB — **77% of the avoidable allocation eliminated**. Trust `Allocated` over `Mean`: a 3-iteration ShortRun on this machine produced `Mean` confidence intervals wider than the effect (e.g. 270,870 us error on an 86,425 us mean). The local "before" (29,937 KB) closely matches the CI-recorded `After_P4` figure (28,995 KB), so `Allocated` is consistent across machines. Re-confirm on the `benchmarks.yml` Short job before quoting the time figures.
 
 ---
 
