@@ -63,13 +63,23 @@ public sealed class BulkBatch(DbContext context) : IBulkBatch
 
     public Task<BulkExecuteResult> ExecuteAsync(BulkExecuteOptions options, CancellationToken cancellationToken = default)
     {
+        ValidateOptions(options);
+        return ExecuteCoreAsync(options, cancellationToken);
+    }
+
+    /// <summary>
+    /// The single definition of "these options are usable". Shared with
+    /// <see cref="BulkBatchExtensions"/>, which must reject bad options <em>before</em>
+    /// invoking the user's <c>build</c>/<c>configure</c> callback.
+    /// </summary>
+    internal static void ValidateOptions(BulkExecuteOptions options)
+    {
         ArgumentNullException.ThrowIfNull(options);
 
         // No defensive copy: the caller's instance is used directly (validated, then read).
         // Contract: do not mutate it while the returned task is in flight; sharing a
         // read-only instance across calls and threads is safe.
         options.Validate();
-        return ExecuteCoreAsync(options, cancellationToken);
     }
 
     internal static BulkExecuteOptions ResolveEffective(DbContext context, BulkExecuteOptions? explicitOptions)

@@ -15,16 +15,16 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 | P2 | Cache expression compilation in translators | Performance | Critical | Medium | DONE |
 | P3 | Fast path for entity-style match updates | Performance | High | Medium | TODO |
 | P4 | StringBuilder-direct SQL emission | Performance | High | Large | DONE |
-| P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | TODO |
-| P6 | Fix null-validation gaps in DbSet extensions | Correctness | High | Small | TODO |
-| P7 | Validate options before user callback runs | Correctness | Medium | Small | TODO |
+| P5 | Fix provider registry thread-safety race | Correctness | Critical | Small | DONE |
+| P6 | Fix null-validation gaps in DbSet extensions | Correctness | High | Small | DONE |
+| P7 | Validate options before user callback runs | Correctness | Medium | Small | DONE |
 | P8 | XML docs on public API surface | Usability | High | Large | TODO |
 | P9 | Add `DbSet.BulkDeleteAsync` sugar + expose entity-row delete | Usability | Medium | Medium | TODO |
 | P10 | Unify builder verb naming (`Set`/`Update`/`SetProperty`) | Usability | Medium | Small | TODO |
 | P11 | Fix `AddNSLabsBulkInstrumentation` DI semantics | Usability | Medium | Medium | TODO |
 | P12 | Emit `BulkExecuteRetrying` (60005) log event | Usability | Low | Small | TODO |
 | P13 | API baseline tooling (PublicAPI/ApiCompat) | Maintainability | High | Medium | TODO |
-| P14 | Test gaps: retry, registry, re-execution, concurrency, DI | Testing | High | Large | TODO |
+| P14 | Test gaps: retry, registry, re-execution, concurrency, DI | Testing | High | Large | IN PROGRESS |
 | P15 | Unify logging/PII verbosity gates | Usability | Low | Small | TODO |
 | P16 | Micro-alloc fixes (lists, reflection, param names, etc.) | Performance | Medium | Medium | TODO |
 
@@ -212,6 +212,8 @@ benchmarks/
 
 **Depends on:** none (can land immediately, independent of benchmarks)
 
+**Status:** DONE — `_providers` is now a `ConcurrentDictionary<string, Lazy<IBulkProvider?>>`. `Lazy` (not bare `GetOrAdd`) is required: `GetOrAdd(key, factory)` does **not** serialize the factory, so it would still let several threads run `Activator.CreateInstance` concurrently. Failed loads are evicted with an atomic compare-and-remove (`TryRemove(KeyValuePair)`) so (a) a failed load is not cached as a permanent negative, and (b) a `Register` landing concurrently is not discarded. `KnownProviders` stays a plain `Dictionary` (read-only after static init). Race **reproduced before the fix** (1 failure in 30 stress runs against the old `Dictionary`) and gone after (0/30). Covered by `BulkProviderRegistryTests` in the SqlServer unit project.
+
 ---
 
 ## P6 — Fix null-validation gaps in DbSet extensions
@@ -235,6 +237,8 @@ In `src/NSLabs.EFCore.Extensions/BulkBatchExtensions.cs`:
 
 **Depends on:** none
 
+**Status:** DONE — `ArgumentNullException.ThrowIfNull(set)` + `ThrowIfNull(configure)` added as the first lines of all four DbSet overloads, matching the `DbContext` overloads' style. The plan's `GetContext` bullet needed **no edit**: guarding `set` at the call sites means the cast chain is unreachable with null, so it can no longer NRE. `set` is reported before `configure` (pinned by tests). Behavior change: these paths now throw `ArgumentNullException` instead of `NullReferenceException`. Covered by `ArgumentValidationTests`.
+
 ---
 
 ## P7 — Validate options before user callback runs
@@ -256,6 +260,8 @@ In `src/NSLabs.EFCore.Extensions/BulkBatchExtensions.cs`:
 - Test proves ordering.
 
 **Depends on:** none
+
+**Status:** DONE — extracted `internal static BulkBatch.ValidateOptions(BulkExecuteOptions)` (null-check + `Validate()`) as the single definition of "usable options"; called by `BulkBatch.ExecuteAsync(options, ct)` and by all three extension overloads *before* `build`/`configure` runs. Order is now `context`/`set` → `configure` → `options` → user callback. Also found and fixed a related defect: `DbContext.BulkExecuteAsync(build, options, ct)` was declared `async`, so **every** exception in it (including the pre-existing `context`/`build` guards) was captured into the returned Task instead of thrown at the call site. Dropped the `async`/`await` (it only added a state machine — `ExecuteAsync` already returns a Task), which makes validation synchronous and consistent with the other five overloads. Covered by `ArgumentValidationTests`, including a guard that the callback still runs when options are valid.
 
 ---
 
@@ -434,6 +440,8 @@ In `src/NSLabs.EFCore.Extensions/BulkBatchExtensions.cs`:
 - CI runs them (already does via `dotnet test --solution`).
 
 **Depends on:** P5, P6, P7, P12, P9 (each test lands with or after its fix)
+
+**Status:** IN PROGRESS — three rows landed with the Wave 0 fixes: parallel registry `Resolve`/`Register` (validates P5), `ArgumentNullException` facts for the DbSet overloads (locks in P6), and the callback-not-invoked ordering facts (locks in P7). Remaining: execution-strategy retry, `TryLoad` missing-provider message, batch re-execution, parallel `ExecuteAsync` / `BulkInstrumentation.Configure`, `AddNSLabsBulkInstrumentation`, `chunk.skipped`, instrumentation failure-isolation, and the thin `EntityStyleExecutionTests` / `MixedAndEntityRowTests` areas.
 
 ---
 
