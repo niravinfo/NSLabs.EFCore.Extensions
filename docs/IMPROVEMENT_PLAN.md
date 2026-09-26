@@ -26,7 +26,7 @@ Status legend: `TODO` | `IN PROGRESS` | `DONE` | `BLOCKED` | `SKIPPED`
 | P13 | API baseline tooling (PublicAPI/ApiCompat) | Maintainability | High | Medium | TODO |
 | P14 | Test gaps: retry, registry, re-execution, concurrency, DI | Testing | High | Large | IN PROGRESS |
 | P15 | Unify logging/PII verbosity gates | Usability | Low | Small | TODO |
-| P16 | Micro-alloc fixes (lists, reflection, param names, etc.) | Performance | Medium | Medium | TODO |
+| P16 | Micro-alloc fixes (lists, reflection, param names, etc.) | Performance | Medium | Medium | IN PROGRESS |
 
 ---
 
@@ -489,6 +489,18 @@ Smaller performance items — batch into one PR after P1-P4 land (or fold into P
 **Acceptance:** existing tests pass; benchmark allocations drop where applicable; dead code removed.
 
 **Depends on:** P1 (measure), ideally after P2/P4 to avoid conflicts.
+
+**Status:** IN PROGRESS — re-audited against the post-P2/P4 tree (2026-09-26); the original list does not survive contact with the code and was **split**, not executed as one batch:
+
+*Why split.* P4's own CI A/B moved `Allocated` only 2–6% on generator-reachable cells, with Large-IN flat at −0.2 KB. Most items below land on paths where the effect is orders of magnitude below BenchmarkDotNet runner noise, so batching them would mean shipping changes that cannot be shown to help. Separately, (i) is not a micro-alloc at all — see below.
+
+**Landed (h, j, c, b):** `OperationIndicesOf` deleted (confirmed zero callers); `SnapshotRef`/`Current` now read a `volatile` field instead of taking a lock, which is sound because `s_current` is only ever *replaced*, never mutated after publish — the lock remains only for `Configure`'s clone-mutate-publish sequence; `GetDistinctIndices` presizes its `HashSet<int>`; the two unpresized `List<object?>` in `LinqPredicateTranslator` now share a `NewInValueList` helper that presizes when the source is an `ICollection` (arrays / `List<T>` / `HashSet<T>`) and falls back to an empty list otherwise. These are behavior-neutral by construction, so no red-green cycle applies; verification is the full suite plus a new torn-publication regression test for the `volatile` read. (f) and (g) are **dropped as not worth it**: both run once per operation, not per row, and the plan overstated them.
+
+**Split out — (i) is a memory leak, not an allocation tweak.** `ModelBinder`'s caches are `ConcurrentDictionary` keyed on `IProperty` / `IEntityType` / `(IEntityType, IProperty)`, holding **strong references to EF metadata**. Every distinct model (per-tenant contexts, differing `IModel` instances) permanently adds entries never released for the process lifetime. P2 already established the fix pattern (`ConditionalWeakTable` in `ExpressionEvaluatorCache`). Needs its own PR, its own review, and a test proving entries are collectable.
+
+**Deferred — (a), (d), (e).** (a) fuses the 3-pass IN scan on the exact code P4 verified with its 535/535 snapshot harness; (e) rewrites `UpsertKey`, whose duplicate detection must never produce a false negative; (d) is *not* the one-liner the plan implies — `CountDecidedTotal` exists in `SqlServerSqlGenerator` and `SqliteSqlGenerator` but **not** in `NpgsqlSqlGenerator`. Defer until a measurement exists that can actually resolve them.
+
+**Tooling note:** for micro-alloc work, BenchmarkDotNet is the wrong instrument. A deterministic allocation-budget test (`GC.GetAllocatedBytesForCurrentThread()` around one operation, asserted against a bound) gives a CI-enforceable signal instead of runner noise. Not yet added.
 
 ---
 

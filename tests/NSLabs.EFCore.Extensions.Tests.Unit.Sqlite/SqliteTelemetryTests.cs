@@ -381,6 +381,58 @@ public class SqliteTelemetryTests : IDisposable
     }
 
     [Fact]
+    public async Task Instrumentation_snapshot_reads_are_never_torn_while_Configure_replaces_them()
+    {
+        // Regression guard for the lock-free SnapshotRef/Current read path. Writers always
+        // set BOTH fields together, so every valid published snapshot satisfies
+        // "CaptureCommandText == (MaxCommandLength == 111)". A reader that observed a
+        // partially-published snapshot would see one field from one writer and the other
+        // from another, breaking that invariant.
+        const int iterations = 2_000;
+
+        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                var snapshot = BulkInstrumentation.Current;
+                Assert.NotNull(snapshot);
+                Assert.True(
+                    snapshot.CaptureCommandText == (snapshot.MaxCommandLength == 111),
+                    $"Torn snapshot: CaptureCommandText={snapshot.CaptureCommandText}, MaxCommandLength={snapshot.MaxCommandLength}.");
+            }
+        }));
+
+        var writers = Enumerable.Range(0, 2).Select(writer => Task.Run(() =>
+        {
+            for (var i = 0; i < iterations; i++)
+            {
+                if (writer == 0)
+                {
+                    BulkInstrumentation.Configure(o =>
+                    {
+                        o.CaptureCommandText = true;
+                        o.MaxCommandLength = 111;
+                    });
+                }
+                else
+                {
+                    BulkInstrumentation.Configure(o =>
+                    {
+                        o.CaptureCommandText = false;
+                        o.MaxCommandLength = 222;
+                    });
+                }
+            }
+        }));
+
+        await Task.WhenAll(readers.Concat(writers));
+
+        // The final published snapshot must itself be one of the two valid configurations.
+        var final = BulkInstrumentation.Current;
+        Assert.True(final.CaptureCommandText == (final.MaxCommandLength == 111));
+    }
+
+    [Fact]
     public void BulkExecuteOptions_untouched_by_instrumentation()
     {
         BulkInstrumentation.Configure(o => o.CaptureCommandText = true);

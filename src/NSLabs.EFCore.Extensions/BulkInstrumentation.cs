@@ -18,33 +18,20 @@ namespace NSLabs.EFCore.Extensions;
 public static class BulkInstrumentation
 {
     private static readonly object s_lock = new();
-    private static BulkInstrumentationOptions s_current = new();
+
+    // Volatile: s_current is only ever *replaced* (never mutated after publish), so a
+    // release/acquire read is sufficient and correct. This keeps the per-batch
+    // SnapshotRef/Current read off the lock; the lock remains only where read-modify-write
+    // atomicity is actually required (Configure's clone-mutate-publish sequence).
+    private static volatile BulkInstrumentationOptions s_current = new();
 
     /// <summary>
     /// Current process-wide policy snapshot. Never <see langword="null"/>.
     /// Do not mutate the returned instance; call <c>Configure</c> to replace it.
     /// </summary>
-    public static BulkInstrumentationOptions Current
-    {
-        get
-        {
-            lock (s_lock)
-            {
-                return s_current;
-            }
-        }
-    }
+    public static BulkInstrumentationOptions Current => s_current;
 
-    internal static BulkInstrumentationOptions SnapshotRef
-    {
-        get
-        {
-            lock (s_lock)
-            {
-                return s_current;
-            }
-        }
-    }
+    internal static BulkInstrumentationOptions SnapshotRef => s_current;
 
     /// <summary>
     /// Replaces the process-wide policy. The action receives a copy of the

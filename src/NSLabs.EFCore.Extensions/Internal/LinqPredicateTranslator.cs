@@ -244,8 +244,7 @@ internal static class LinqPredicateTranslator
                     var prop = ResolveProperty(im, entityType);
                     var collection = Evaluate(collectionExpr) as System.Collections.IEnumerable;
                     if (collection is null) throw new NotSupportedException("Contains collection is null.");
-                    var values = new List<object?>();
-                    foreach (var v in collection) values.Add(ModelBinder.ConvertToProvider(prop, v));
+                    var values = NewInValueList(prop, collection);
                     return new SqlInNode(prop, values);
                 }
             }
@@ -269,8 +268,7 @@ internal static class LinqPredicateTranslator
                     var prop = ResolveProperty(im2, entityType);
                     var collection = Evaluate(sourceExpr) as System.Collections.IEnumerable;
                     if (collection is null) throw new NotSupportedException("Contains source is null.");
-                    var values = new List<object?>();
-                    foreach (var v in collection) values.Add(ModelBinder.ConvertToProvider(prop, v));
+                    var values = NewInValueList(prop, collection);
                     return new SqlInNode(prop, values);
                 }
             }
@@ -283,6 +281,24 @@ internal static class LinqPredicateTranslator
         }
 
         throw new NotSupportedException($"Method '{call.Method.DeclaringType?.Name}.{call.Method.Name}' is not supported in predicates. Supported: string.Contains/StartsWith/EndsWith/Equals, string.IsNullOrEmpty/IsNullOrWhiteSpace, collection.Contains (IN), EF.Functions.Like.");
+    }
+
+    // Materializes a Contains collection into the SqlInNode value list, converting each
+    // element to its provider representation. The source is a non-generic IEnumerable, so
+    // the element count is only known up front when it also implements ICollection
+    // (arrays, List<T>, HashSet<T> — the overwhelmingly common shapes).
+    private static List<object?> NewInValueList(IProperty property, System.Collections.IEnumerable collection)
+    {
+        var values = collection is System.Collections.ICollection sized
+            ? new List<object?>(sized.Count)
+            : [];
+
+        foreach (var v in collection)
+        {
+            values.Add(ModelBinder.ConvertToProvider(property, v));
+        }
+
+        return values;
     }
 
     // The Contains item side is a bare member access in the common case, but a nullable

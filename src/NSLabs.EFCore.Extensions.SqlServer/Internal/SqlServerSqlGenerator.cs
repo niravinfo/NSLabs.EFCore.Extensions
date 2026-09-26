@@ -214,7 +214,7 @@ internal static class SqlServerSqlGenerator
 
     private static List<int> GetDistinctIndices(IReadOnlyList<PendingUnit> units)
     {
-        var seen = new HashSet<int>();
+        var seen = new HashSet<int>(units.Count);
         var list = new List<int>(units.Count);
         foreach (var unit in units)
         {
@@ -225,9 +225,6 @@ internal static class SqlServerSqlGenerator
         }
         return list;
     }
-
-    private static IEnumerable<int> OperationIndicesOf(IReadOnlyList<PendingUnit> units)
-        => units.Select(unit => unit.Operation.GlobalIndex).Distinct();
 
     private static void EmitStatement(ParameterEmitter emitter, StringBuilder sql, BoundOperation operation)
     {
