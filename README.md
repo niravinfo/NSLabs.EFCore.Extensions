@@ -1,5 +1,12 @@
 # NSLabs.EFCore.Extensions
 
+[![Build](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/build.yml/badge.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/build.yml)
+[![Release](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/release.yml/badge.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/release.yml)
+[![NuGet](https://img.shields.io/nuget/v/NSLabs.EFCore.Extensions.svg)](https://www.nuget.org/packages/NSLabs.EFCore.Extensions/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/NSLabs.EFCore.Extensions.svg)](https://www.nuget.org/packages/NSLabs.EFCore.Extensions/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+
 Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transaction (no implicit transaction by default — see [Transactions](#transactions)).
 
 SQL Server (batched parameterized script + `MERGE` for upserts), SQLite (`INSERT ... ON CONFLICT` upserts, zero-config file DB), and PostgreSQL (`INSERT ... ON CONFLICT` upserts via Npgsql) are supported. MySQL is planned.
@@ -15,8 +22,9 @@ This library: `N` heterogeneous `UPDATE` / `UPSERT` / `DELETE` across multiple t
 
 ## Installation
 
+Install only the provider for your database — each provider package brings in the core `NSLabs.EFCore.Extensions` package automatically:
+
 ```bash
-dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.SqlServer   # SQL Server provider
 dotnet add package NSLabs.EFCore.Extensions.Sqlite      # SQLite provider
 dotnet add package NSLabs.EFCore.Extensions.Npgsql      # PostgreSQL provider
@@ -86,7 +94,6 @@ Supported in computed expressions: arithmetic (`+ - * / %`), string concat (`+`)
 ```csharp
 IBulkBatch batch = db.CreateBulkBatch();
 batch.Update<Item>(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "Value1"));
-ApplyRules(batch);
 var r = await batch.ExecuteAsync(ct);
 ```
 

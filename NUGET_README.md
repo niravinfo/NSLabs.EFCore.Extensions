@@ -1,5 +1,12 @@
 # NSLabs.EFCore.Extensions
 
+[![Build](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/build.yml/badge.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/build.yml)
+[![Release](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/release.yml/badge.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/workflows/release.yml)
+[![NuGet](https://img.shields.io/nuget/v/NSLabs.EFCore.Extensions.svg)](https://www.nuget.org/packages/NSLabs.EFCore.Extensions/)
+[![NuGet Downloads](https://img.shields.io/nuget/dt/NSLabs.EFCore.Extensions.svg)](https://www.nuget.org/packages/NSLabs.EFCore.Extensions/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+
 Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transactions.
 
 ## Why
@@ -15,26 +22,23 @@ This library: `N` heterogeneous `UPDATE` / `UPSERT` / `DELETE` across multiple t
 
 **Requirements:** `.NET 10` and `Microsoft.EntityFrameworkCore` `10.0.0`
 
-Choose your database provider:
+Choose your database provider — each provider package brings in the core `NSLabs.EFCore.Extensions` package automatically:
 
 ### SQL Server
 
 ```bash
-dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.SqlServer
 ```
 
 ### SQLite
 
 ```bash
-dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.Sqlite
 ```
 
 ### PostgreSQL
 
 ```bash
-dotnet add package NSLabs.EFCore.Extensions
 dotnet add package NSLabs.EFCore.Extensions.Npgsql
 ```
 
@@ -85,7 +89,6 @@ await db.Items.BulkUpdateAsync(b =>
 ```csharp
 IBulkBatch batch = db.CreateBulkBatch();
 batch.Update<Item>(op => op.Where(x => x.Id == 6).Set(x => x.Key1, "Value1"));
-ApplyRules(batch);
 var result = await batch.ExecuteAsync(ct);
 ```
 
