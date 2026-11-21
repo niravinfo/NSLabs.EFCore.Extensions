@@ -91,10 +91,10 @@ public class CapturedValueBenchmarks : BenchmarkBase
         var batch = new BulkBatch(_context);
         for (var i = 0; i < Operations; i++)
         {
-            var width = 5;
+            var replacement = i.ToString();
             batch.Update<BenchItem>(op => op
                 .Where(x => x.Id == i)
-                .Set(x => x.Key1, x => x.Key1.PadLeft(width)));
+                .Set(x => x.Key1, x => x.Key1.Replace("a", replacement)));
         }
 
         return batch.Operations.Count;
