@@ -7,22 +7,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
 
-Batched conditional bulk update / upsert for Entity Framework Core — execute *N different* `WHERE` + `SET` operations in **one round-trip** with sequential semantics (later ops see earlier writes) and caller-controlled transactions.
+Batched conditional bulk update / upsert for Entity Framework Core. It runs *N different* `WHERE` + `SET` operations in one round-trip with sequential semantics (later operations see earlier writes). Transactions are caller-controlled.
 
-## Why
+## How it compares
 
-Standard EF Core:
+With plain EF Core, `ExecuteUpdateAsync` takes one filter and one payload per call, so N operations mean N round-trips. `BulkExtensions` and `FlexLabs.Upsert` are limited to primary-key matching or one operation per call.
 
-- `ExecuteUpdateAsync` → 1 filter + 1 payload per call = N round-trips
-- `BulkExtensions` / `FlexLabs.Upsert` → PK-only or 1 op per call
-
-This library: `N` heterogeneous `UPDATE` / `UPSERT` / `DELETE` across multiple tables, one `DbCommand`, param-budget chunking (~2100 params on SQL Server), per-op `RowsAffected`.
+This library runs `N` heterogeneous `UPDATE`, `UPSERT` and `DELETE` operations across multiple tables in one `DbCommand`. It chunks large batches to stay under the parameter budget (about 2100 parameters on SQL Server) and reports `RowsAffected` per operation.
 
 ## Installation
 
-**Requirements:** `.NET 10` and `Microsoft.EntityFrameworkCore` `10.0.0`
+Requirements: `.NET 10` and `Microsoft.EntityFrameworkCore` `10.x.x`
 
-Choose your database provider — each provider package brings in the core `NSLabs.EFCore.Extensions` package automatically:
+Choose a provider package.
 
 ### SQL Server
 
@@ -44,11 +41,11 @@ dotnet add package NSLabs.EFCore.Extensions.Npgsql
 
 ### MySQL
 
-Coming soon. Provider support is being expanded.
+Not supported yet.
 
-## Quick Start
+## Quick start
 
-### Bulk Batch (multi-table, single round-trip)
+### Bulk batch (multi-table, single round-trip)
 
 ```csharp
 var today = DateTime.UtcNow.Date;
@@ -61,8 +58,7 @@ var result = await db.BulkExecuteAsync(b =>
     b.Update<Order>(op => op.Where(x => x.Status == OrderStatus.Pending)
                             .Set(x => x.Status, OrderStatus.Shipped));
 
-    // Atomic page-view counter: row exists -> Views + 1 inside the UPDATE;
-    // row missing -> insert with Views = 1. No read-modify-write round-trip.
+    // Page-view counter: increment existing rows, insert missing ones with Views = 1.
     b.Upsert<DailyArticleViews>(u => u.MatchOn(v => new { v.ArticleId, v.Date })
                                       .Update(v => v.Views, v => v.Views + 1)
                                       .Insert(new DailyArticleViews { ArticleId = 42, Date = today, Views = 1 }));
@@ -72,9 +68,9 @@ var result = await db.BulkExecuteAsync(b =>
 result.Operations[0].RowsAffected;
 ```
 
-### Simple Helper (single table)
+### Single-table helper
 
-If all your updates are for the same table, you can use this shorter way:
+When every operation targets the same table, use this shorter form:
 
 ```csharp
 await db.Items.BulkUpdateAsync(b =>
@@ -84,7 +80,7 @@ await db.Items.BulkUpdateAsync(b =>
 });
 ```
 
-### Deferred Builder
+### Deferred builder
 
 ```csharp
 IBulkBatch batch = db.CreateBulkBatch();
@@ -94,10 +90,10 @@ var result = await batch.ExecuteAsync(ct);
 
 ## Transactions
 
-Bulk operations **do not create a transaction** by default (matches `EFCore.BulkExtensions` and EF Core `ExecuteUpdate` behavior). For atomic all-or-nothing execution across multiple operations or mixed `SaveChanges`, start a transaction yourself:
+Bulk operations do not create a transaction. Like `EFCore.BulkExtensions` and EF Core `ExecuteUpdate`, each statement relies on the database's implicit per-statement transaction. If you need all-or-nothing execution across operations or a mix of bulk work and `SaveChanges`, start a transaction yourself:
 
 ```csharp
-// 1. No transaction (default) — each statement commits individually
+// 1. No transaction (default): each statement commits individually
 var reading = new EnergyReading
 {
     MeterId = "MTR-1001",
@@ -115,30 +111,30 @@ var r = await db.BulkExecuteAsync(b =>
                                   .Insert(reading));
 });
 
-// 2. Caller-managed transaction — atomic across all operations
+// 2. Caller-managed transaction: atomic across all operations
 await using var tx = await db.Database.BeginTransactionAsync();
 try
 {
     await db.BulkExecuteAsync(b => { b.Update<Item>(...); b.Delete<AuditLog>(...); });
-    await db.SaveChangesAsync(); // optional — participates in same transaction
+    await db.SaveChangesAsync(); // optional: participates in the same transaction
     await tx.CommitAsync();
 }
 catch { await tx.RollbackAsync(); throw; }
 
-// 3. Integrate with existing ADO.NET transaction
+// 3. Use an existing ADO.NET transaction
 await db.Database.UseTransactionAsync(connTx);
 await db.BulkExecuteAsync(b => { ... });
 ```
 
-The executor piggybacks on `Database.CurrentTransaction` and never commits/rollbacks itself. `ThrowIfZeroAffected` is validated after all chunks — without a transaction, prior chunks are already committed; with a transaction, the caller can roll back.
+The executor uses `Database.CurrentTransaction` and never commits or rolls back. `ThrowIfZeroAffected` is checked after all chunks. Without a transaction, earlier chunks have already committed; with one, the caller can roll them back.
 
-## Documentation & Support
+## Documentation and support
 
-- **Full Documentation:** [Design & Architecture](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/DESIGN.md)
-- **Sample Code:** [Working Examples](https://github.com/niravinfo/NSLabs.EFCore.Extensions/tree/main/samples)
-- **Issues & Feature Requests:** [GitHub Issues](https://github.com/niravinfo/NSLabs.EFCore.Extensions/issues)
-- **Source Code:** [GitHub Repository](https://github.com/niravinfo/NSLabs.EFCore.Extensions)
+- [Design & Architecture](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/docs/DESIGN.md)
+- [Working examples](https://github.com/niravinfo/NSLabs.EFCore.Extensions/tree/main/samples)
+- [GitHub Issues](https://github.com/niravinfo/NSLabs.EFCore.Extensions/issues)
+- [Source repository](https://github.com/niravinfo/NSLabs.EFCore.Extensions)
 
 ## License
 
-MIT
+MIT.
