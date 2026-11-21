@@ -323,11 +323,7 @@ internal static class LinqPredicateTranslator
             return false;
         }
 
-        var defaultComparer = typeof(EqualityComparer<>)
-            .MakeGenericType(elementType)
-            .GetProperty("Default")?
-            .GetValue(null);
-        return Equals(comparer, defaultComparer);
+        return Equals(comparer, ExpressionEvaluatorCache.GetDefaultEqualityComparer(elementType));
     }
 
     private static string EscapeLike(string pattern)
@@ -410,83 +406,7 @@ internal static class LinqPredicateTranslator
                $"Property '{entityType.DisplayName()}.{member.Member.Name}' is not part of the EF model and cannot be used in bulk operations.");
 
     private static object? Evaluate(Expression expression)
-    {
-        if (expression is ConstantExpression ce)
-        {
-            return ce.Value;
-        }
-
-        if (expression is MemberExpression me)
-        {
-            // Direct closure field: captured variable
-            if (me.Expression is ConstantExpression ce2)
-            {
-                if (me.Member is System.Reflection.FieldInfo fi) return fi.GetValue(ce2.Value);
-                if (me.Member is System.Reflection.PropertyInfo pi) return pi.GetValue(ce2.Value);
-            }
-
-            // Nested member access: recurse (handles display-class nesting)
-            if (me.Expression is not null)
-            {
-                var obj = Evaluate(me.Expression);
-                if (me.Member is System.Reflection.FieldInfo fi2) return fi2.GetValue(obj);
-                if (me.Member is System.Reflection.PropertyInfo pi2) return pi2.GetValue(obj);
-            }
-        }
-
-        if (expression is UnaryExpression ue && (ue.NodeType == ExpressionType.Convert || ue.NodeType == ExpressionType.ConvertChecked))
-        {
-            return Evaluate(ue.Operand);
-        }
-
-        if (expression is NewArrayExpression nae)
-        {
-            var elementType = nae.Type.GetElementType() ?? typeof(object);
-            var array = Array.CreateInstance(elementType, nae.Expressions.Count);
-            for (var i = 0; i < nae.Expressions.Count; i++)
-            {
-                array.SetValue(Evaluate(nae.Expressions[i]), i);
-            }
-            return array;
-        }
-
-        if (expression is ListInitExpression lie)
-        {
-            var list = Evaluate(lie.NewExpression);
-            if (list is System.Collections.IList ilist)
-            {
-                foreach (var init in lie.Initializers)
-                {
-                    foreach (var arg in init.Arguments)
-                    {
-                        ilist.Add(Evaluate(arg));
-                    }
-                }
-            }
-            return list;
-        }
-
-        if (expression is NewExpression ne)
-        {
-            var args = ne.Arguments.Select(Evaluate).ToArray();
-            return ne.Constructor?.Invoke(args);
-        }
-
-        // Fallback: try to compile (for captured string patterns etc.) — no global cache, follows EF Core.
-        // EF Core does NOT keep static ConcurrentDictionary<Expression,Func> here; it evaluates via
-        // EvaluatableExpressionFilter + direct FieldInfo.GetValue for Member chains (already handled above)
-        // and compiles per-query which is then cached via IMemoryCache with SizeLimit+Expiration (per IServiceProvider).
-        try
-        {
-            var lambda = System.Linq.Expressions.Expression.Lambda(expression);
-            return lambda.Compile().DynamicInvoke();
-        }
-        catch
-        {
-            var converted = System.Linq.Expressions.Expression.Convert(expression, typeof(object));
-            return System.Linq.Expressions.Expression.Lambda<Func<object?>>(converted).Compile().Invoke();
-        }
-    }
+        => ExpressionEvaluatorCache.Evaluate(expression);
 
     private static SqlBinaryOperator ToOperator(ExpressionType type) => type switch
     {
