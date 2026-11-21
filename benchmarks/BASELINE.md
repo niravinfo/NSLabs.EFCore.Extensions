@@ -1,6 +1,6 @@
 # Benchmark Baseline (pre-optimization)
 
-Captured **2026-09-23** via the `benchmarks.yml` GitHub Actions workflow (`job=Short`)
+Captured 2026-09-23 via the `benchmarks.yml` GitHub Actions workflow (`job=Short`)
 before P2 (expression compilation caching) landed. Compare future runs against this file.
 
 ## Environment
@@ -9,15 +9,15 @@ before P2 (expression compilation caching) landed. Compare future runs against t
 - Linux Ubuntu 24.04.5 LTS (Noble Numbat)
 - AMD EPYC 9V45 4.35GHz, 1 CPU, 4 logical and 2 physical cores
 - .NET SDK 10.0.401 / .NET 10.0.12, X64 RyuJIT x86-64-v4
-- Job: `ShortRun` — IterationCount=3, LaunchCount=1, WarmupCount=3
+- Job: `ShortRun` (IterationCount=3, LaunchCount=1, WarmupCount=3)
 
-**Comparison rules** (same as `benchmarks/README.md`):
+Comparison rules (same as `benchmarks/README.md`):
 
 - Only compare runs from this workflow (same ubuntu runner image).
 - Never compare against local Windows runs.
 - On shared runners, trust `Allocated` more than `Mean` (timings are noisy).
 
-**Not captured in this run:** `Bind.PredicateTranslationBenchmarks` (filter output missing — re-run with `--filter '*PredicateTranslation*'` and append below).
+Not captured in this run: `Bind.PredicateTranslationBenchmarks` (filter output was missing). Re-run with `--filter '*PredicateTranslation*'` and append the results below.
 
 ---
 
@@ -32,9 +32,9 @@ before P2 (expression compilation caching) landed. Compare future runs against t
 | BindComputedColumnArithmetic         | 10000      |  23,835.51 us |  11,186.79 us |   613.186 us | 1875.0000 | 1093.7500 | 562.5000 | 28304.33 KB |
 | BindComputedWithCapturedSubexpression | 10000     | 380,676.09 us | 130,615.12 us | 7,159.455 us | 4000.0000 | 2000.0000 |         - | 75385.34 KB |
 
-Headline: captured-subexpression bind is ~16× slower and ~2.7× more allocating than
-arithmetic-only at 10k — this is the uncached `SetExpressionTranslator.Evaluate`
-`Compile()` path P2 eliminates.
+Captured-subexpression binding is about 16× slower and allocates about 2.7× more than
+arithmetic-only binding at 10k operations. This is the uncached
+`SetExpressionTranslator.Evaluate` `Compile()` path that P2 eliminates.
 
 ---
 
@@ -65,7 +65,7 @@ arithmetic-only at 10k — this is the uncached `SetExpressionTranslator.Evaluat
 | BindAndGeneratePrimaryKeyMatch | 10000 | 19,905.665 us | 10,620.4845 us | 582.1446 us | 2156.2500 | 2125.0000 | 1375.0000 | 20767.62 KB |
 | BindAndGenerateCustomMatch     | 10000 | 39,735.377 us | 15,638.6631 us | 857.2079 us | 2769.2308 | 2230.7692 | 1384.6154 | 30906.83 KB |
 
-Headline: custom match ≈ 2× PK match at 10k (per-row rewrite path — P3).
+Custom match is about twice as slow as PK match at 10k rows (per-row rewrite path, P3).
 
 ---
 
@@ -87,4 +87,4 @@ Headline: custom match ≈ 2× PK match at 10k (per-row rewrite path — P3).
 | BindAndGenerateUpdateStatements | 1000      |  2,794.51 us |  2,549.13 us |   139.727 us |  421.8750 |  375.0000 |  203.1250 |  5598.87 KB |
 | BindAndGenerateUpdateStatements | 10000     | 50,304.61 us | 74,424.62 us | 4,079.465 us | 4000.0000 | 2500.0000 | 1500.0000 | 56158.76 KB |
 
-Headline: ~5.6 KB allocated per generated statement — intermediate-string emission (P4).
+SQL generation allocates about 5.6 KB per statement, mostly from intermediate-string emission (P4).

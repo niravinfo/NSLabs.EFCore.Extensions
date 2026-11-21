@@ -1,15 +1,15 @@
 # NSLabs.EFCore.Extensions - Samples
 
-This folder contains sample applications demonstrating all features of NSLabs.EFCore.Extensions. Layout is provider-consistent for future providers.
+Sample applications for NSLabs.EFCore.Extensions. Each provider uses the same layout so new ones can be added easily.
 
 ```bash
-# SQLite (zero-config, file DB) - drops + recreates nsamples.db from the current model, then runs all scenarios
+# SQLite (file-based database): drops and recreates nsamples.db from the current model, then runs all scenarios
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Sqlite
 
-# Windows (LocalDB) or Linux with env override - drops + recreates the DB, then runs all scenarios
+# Windows (LocalDB) or Linux with an environment override: drops and recreates the database, then runs all scenarios
 dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 
-# One-click Docker (Linux/Windows/Mac) - builds image, starts SQL Server, runs all scenarios (only sample logs)
+# Docker (Linux/Windows/macOS): builds the image, starts SQL Server and runs all scenarios; only sample logs are shown
 docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up --build --attach samples
 
 # future: dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.Postgres
@@ -22,59 +22,59 @@ samples/
   README.md
   NSLabs.EFCore.Extensions.Samples.Shared/    # Shared domain (Product/Customer/Order/DailyArticleViews/EnergyReading) + Scenarios
     Models/ Data/ Scenarios/
-  NSLabs.EFCore.Extensions.Samples.SqlServer/ # Thin host: Program.cs + appsettings.json (UseSqlServer)
+  NSLabs.EFCore.Extensions.Samples.SqlServer/ # Minimal host: Program.cs + appsettings.json (UseSqlServer)
     Dockerfile                                # Multi-stage build
     docker-compose.yml                        # mssql + samples (SQL Server only, no root compose)
     .dockerignore
-  NSLabs.EFCore.Extensions.Samples.Sqlite/  # Thin host: Program.cs + appsettings.json (UseSqlite, Data Source=nsamples.db)
+  NSLabs.EFCore.Extensions.Samples.Sqlite/  # Minimal host: Program.cs + appsettings.json (UseSqlite, Data Source=nsamples.db)
   // future: NSLabs.EFCore.Extensions.Samples.Postgres/  # UseNpgsql, same Shared
 ```
 
 ### NSLabs.EFCore.Extensions.Samples.Shared
-Provider-agnostic scenarios (Basic/Advanced/Transaction/RealWorld/TableApiAndOptions) with isolated run via `DatabaseHelper.ClearAllAsync` — takes `SampleDbContext` + `ILogger`, no `UseSqlServer`/`UseSqlite`. Reused by every provider host.
+Provider-agnostic scenarios (Basic/Advanced/Transaction/RealWorld/TableApiAndOptions) run in isolation through `DatabaseHelper.ClearAllAsync`, which takes `SampleDbContext` and `ILogger` and references neither `UseSqlServer` nor `UseSqlite`. Every provider host reuses them.
 
 ### NSLabs.EFCore.Extensions.Samples.SqlServer
-Thin console host for SQL Server:
-- `Microsoft.Extensions.Hosting` + `Microsoft.Extensions.Logging.Console`
+Minimal console host for SQL Server:
+- `Microsoft.Extensions.Hosting` and `Microsoft.Extensions.Logging.Console`
 - `AddDbContext<SampleDbContext>(o=>o.UseSqlServer(conn))`
-- `Program.cs` does single `EnsureCreatedAsync()` (no retry) - compose `healthcheck + depends_on: service_healthy` is the single wait source (Option A)
+- `Program.cs` calls `EnsureCreatedAsync()` once with no retry. The compose `healthcheck` and `depends_on: service_healthy` are the only wait mechanism.
 
 ### Example Categories
 
-1. **Basic Examples** (5 examples)
+1. Basic Examples (5 examples)
    - Simple bulk update
    - Update with predicates
    - Atomic bulk upsert (page-view counter)
    - Bulk delete
    - Multiple sets on same entity
 
-2. **Advanced Examples** (4 examples)
+2. Advanced Examples (4 examples)
    - Multi-table batch operations
    - Computed set expressions
    - Conditional updates across tables
    - Sequential semantics
 
-3. **Transaction Examples** (4 examples)
+3. Transaction Examples (4 examples)
    - No transaction (default)
    - Explicit transactions
    - Mixed with SaveChanges
    - Rollback on error
 
-4. **Real-World Examples** (5 examples)
+4. Real-World Examples (5 examples)
    - Inventory restock workflow
    - Order fulfillment workflow
    - Dynamic pricing by category
    - Customer loyalty batch processing
    - Smart meter sync (upsert batch)
 
-5. **Table API and Options** (chunking, ThrowIfZeroAffected, CreateBulkBatch)
+5. Table API and Options (chunking, ThrowIfZeroAffected, CreateBulkBatch)
 
-## 🛠️ Requirements
+## Requirements
 
-- **.NET 10 SDK**
-- **SQL Server** (LocalDB, Express, Docker, or full version) - DB is dropped + recreated from the current model on every run (rerunnable with zero setup)
+- .NET 10 SDK
+- SQL Server (LocalDB, Express, Docker or a full installation). The database is dropped and recreated from the current model on every run, so repeats need no extra setup.
 
-### Option 1: LocalDB (Windows - zero config)
+### Option 1: LocalDB (Windows, no configuration)
 
 Default `appsettings.json` uses `Server=(localdb)\\mssqllocaldb`. Just run:
 
@@ -84,9 +84,9 @@ dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 
 If LocalDB not running: `sqllocaldb start mssqllocaldb`
 
-### Option 2: Docker (Windows / Linux / Mac - recommended for Linux)
+### Option 2: Docker (Windows, Linux or macOS; recommended on Linux)
 
-No manual DB setup. SQL Server runs in container, DB auto-created. Only **sample logs** are shown - get logs directly from the `samples` container (cleanest, `mssql` boot noise hidden):
+SQL Server runs in a container and the database is created automatically. Only sample logs are shown, with the `mssql` boot output hidden. To read those logs, attach to the `samples` container:
 
 ```bash
 # From repo root - only sample logs (mssql logs hidden by --attach, still retrievable via docker logs)
@@ -98,14 +98,14 @@ cd samples/NSLabs.EFCore.Extensions.Samples.SqlServer
 docker compose up --build --attach samples
 docker compose down -v
 
-# Alternative cleanest: run detached and fetch logs from container itself
+# Or run detached and follow the samples log
 docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up --build -d
 docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml logs -f samples
 # Show all logs (for debugging mssql startup):
 docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml logs mssql
 ```
 
-`docker-compose.yml` (inside `SqlServer` folder, SQL Server only) provides `mssql` with `healthcheck` and `samples` with `depends_on: service_healthy` (single wait source, no app retry). `Program.cs:71` does single `EnsureCreatedAsync()` - Docker `healthcheck` is the only wait; `--attach samples` or `logs -f samples` streams only `samples` (`ILogger`) directly from the container without SQL Server boot noise, while `mssql` logs remain retrievable via `docker compose logs mssql`.
+`docker-compose.yml` lives in the `SqlServer` folder and defines two services: `mssql` with a `healthcheck`, and `samples` with `depends_on: service_healthy`. The health check is the only wait mechanism; the app does not retry. `Program.cs:71` calls `EnsureCreatedAsync()` once. Use `--attach samples` or `logs -f samples` to stream only the `ILogger` output, without SQL Server boot noise. The `mssql` logs are still available through `docker compose logs mssql`.
 
 ### Option 3: Your Own SQL Server / Bare Linux
 
@@ -132,27 +132,23 @@ ConnectionStrings__DefaultConnection="Server=YOUR_SERVER;Database=NSLabsSample;.
 
 ## Documentation
 
-- **SqlServer host**: `NSLabs.EFCore.Extensions.Samples.SqlServer/Program.cs`
-- **Sqlite host**: `NSLabs.EFCore.Extensions.Samples.Sqlite/Program.cs`
-- **Shared scenarios**: `NSLabs.EFCore.Extensions.Samples.Shared/Scenarios/`
-- **Docker**: `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/Dockerfile` + `docker-compose.yml` + `.dockerignore` (all co-located, SQL Server only)
-- **Main Library README**: [../README.md](../README.md)
-- **Design Details**: [../docs/DESIGN.md](../docs/DESIGN.md)
+- SQL Server host: `NSLabs.EFCore.Extensions.Samples.SqlServer/Program.cs`
+- SQLite host: `NSLabs.EFCore.Extensions.Samples.Sqlite/Program.cs`
+- Shared scenarios: `NSLabs.EFCore.Extensions.Samples.Shared/Scenarios/`
+- Docker files: `samples/NSLabs.EFCore.Extensions.Samples.SqlServer/Dockerfile`, `docker-compose.yml` and `.dockerignore`, all in the SQL Server folder
+- Main library README: [../README.md](../README.md)
+- Design document: [../docs/DESIGN.md](../docs/DESIGN.md)
 
-## 💡 Learning Path
+## Learning path
 
-1. **Start with Basic Examples** - Understand the fundamentals
-2. **Move to Advanced Examples** - Learn complex scenarios
-3. **Review Transaction Examples** - Master transaction handling
-4. **Explore Real-World Examples** - See practical applications
+1. Start with the Basic examples to learn the API.
+2. Move on to the Advanced examples for more complex scenarios.
+3. Review the Transaction examples for transaction handling.
+4. Explore the Real-World examples for complete applications.
 
-Each example is self-contained and includes:
-- Setup code (creating test data)
-- Bulk operation execution
-- Verification and output
-- Detailed comments
+Each example is self-contained and includes setup code, the bulk operation, verification with output, and comments explaining the steps.
 
-## 🎓 Example Code Preview
+## Example code
 
 ### Simple Update
 ```csharp
@@ -187,10 +183,10 @@ try
 catch { await tx.RollbackAsync(); throw; }
 ```
 
-## 🤝 Contributing
+## Contributing
 
-Found an issue or have an idea for a new example? Contributions welcome!
+Open an issue if you find a problem or want to add an example.
 
 ---
 
-**Ready to dive in?** `dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer` or `docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up --build --attach samples` and watch `ILogger` console output (only sample logs).
+To run the SQL Server sample, use `dotnet run --project samples/NSLabs.EFCore.Extensions.Samples.SqlServer` or `docker compose -f samples/NSLabs.EFCore.Extensions.Samples.SqlServer/docker-compose.yml up --build --attach samples`, then watch the `ILogger` output.

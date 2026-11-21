@@ -28,6 +28,7 @@ permissions:
 jobs:
   publish:
     name: Pack and Publish to NuGet
+    environment: Production
     runs-on: ubuntu-latest
 
     steps:
