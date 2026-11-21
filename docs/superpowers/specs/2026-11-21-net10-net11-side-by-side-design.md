@@ -18,10 +18,13 @@ matching EF provider stack. No direct jump to .NET 11 for existing consumers.
   `net10.0` group pins EF 10.0.15 / Npgsql 10.0.4 / Extensions 10.0.15;
   `net11.0` group pins EF 11.0.0 / Npgsql 11.0.0 / Extensions 11.0.0.
 - Provider internals (`SqlServerOptionsExtension`, EF1001 APIs) are isolated in
-  the provider projects; use `#if NET11_0` adapters only where the EF 11 API
-  shape differs, so the `net10.0` output is unchanged.
-- Unit tests run on both TFMs; golden-SQL tests must be verified against the
-  EF 11 SQL Server compatibility-level default (160).
+  the provider projects. Their API surface is identical in EF 10.0.15 and
+  11.0.0 — no `#if NET11_0` adapter was needed. The only difference that reaches
+  the library is the default compat level (150 → 160), which is inherited from
+  EF rather than hardcoded. See `docs/ef-core-11-upgrade-analysis.md`.
+- Unit tests run on both TFMs; the one golden-SQL test whose premise depends on
+  the default compat level is TFM-specific (throws on `net10.0`, emits `LEAST`
+  on `net11.0`).
 - NuGet package ships `lib/net10.0` and `lib/net11.0` assets.
 
 **Non-goals:** changing the public API, dropping `net10.0`, adding EF 9 or

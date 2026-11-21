@@ -30,6 +30,8 @@ dotnet add package NSLabs.EFCore.Extensions.Npgsql      # PostgreSQL provider
 
 Targets both `.NET 10` (with `Microsoft.EntityFrameworkCore` `10.x.x`) and `.NET 11` (with `Microsoft.EntityFrameworkCore` `11.x.x`). NuGet selects the matching build automatically.
 
+> **SQL Server compatibility:** EF Core 11 defaults `UseSqlServer` to compatibility level 160 (SQL Server 2022), so `Math.Min`/`Math.Max` inside `Set(...)` translate to `LEAST`/`GREATEST`. EF Core 10 defaults to 150 and throws an actionable exception instead. If your database is older than SQL Server 2022, set `UseCompatibilityLevel(150)` explicitly.
+
 ## Quick start
 
 ### Bulk batch (multi-table, single round-trip)
