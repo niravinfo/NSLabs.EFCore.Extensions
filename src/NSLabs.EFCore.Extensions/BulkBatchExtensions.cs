@@ -31,18 +31,25 @@ public static class BulkBatchExtensions
     /// this call and is used directly without a defensive copy: do not mutate it while the
     /// returned task is in flight. Sharing a read-only instance across calls and threads is safe.
     /// </remarks>
-    public static async Task<BulkExecuteResult> BulkExecuteAsync(
+    public static Task<BulkExecuteResult> BulkExecuteAsync(
         this DbContext context,
         Action<IBulkBatch> build,
         BulkExecuteOptions options,
         CancellationToken cancellationToken = default)
     {
+        // Deliberately not 'async': an async method body captures every exception into the
+        // returned Task, which would defer argument validation to the await point instead of
+        // failing at the call site. ExecuteAsync already returns a Task, so awaiting it here
+        // would only add a state machine.
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(build);
 
+        // Validated before build(batch): argument validation must not run user code first.
+        BulkBatch.ValidateOptions(options);
+
         var batch = new BulkBatch(context);
         build(batch);
-        return await batch.ExecuteAsync(options, cancellationToken).ConfigureAwait(false);
+        return batch.ExecuteAsync(options, cancellationToken);
     }
 
     public static Task<BulkExecuteResult> BulkUpdateAsync<TEntity>(
@@ -50,6 +57,9 @@ public static class BulkBatchExtensions
         Action<TableUpdateBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpdateBuilder<TEntity>(batch));
         return batch.ExecuteAsync(cancellationToken);
@@ -66,6 +76,12 @@ public static class BulkBatchExtensions
         BulkExecuteOptions options,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        // Validated before configure(...): argument validation must not run user code first.
+        BulkBatch.ValidateOptions(options);
+
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpdateBuilder<TEntity>(batch));
         return batch.ExecuteAsync(options, cancellationToken);
@@ -76,6 +92,9 @@ public static class BulkBatchExtensions
         Action<TableUpsertBuilder<TEntity>> configure,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpsertBuilder<TEntity>(batch));
         return batch.ExecuteAsync(cancellationToken);
@@ -92,6 +111,12 @@ public static class BulkBatchExtensions
         BulkExecuteOptions options,
         CancellationToken cancellationToken = default) where TEntity : class
     {
+        ArgumentNullException.ThrowIfNull(set);
+        ArgumentNullException.ThrowIfNull(configure);
+
+        // Validated before configure(...): argument validation must not run user code first.
+        BulkBatch.ValidateOptions(options);
+
         var batch = new BulkBatch(GetContext(set));
         configure(new TableUpsertBuilder<TEntity>(batch));
         return batch.ExecuteAsync(options, cancellationToken);
