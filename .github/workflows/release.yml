@@ -90,10 +90,20 @@ jobs:
       - name: Build (Release)
         run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release -p:ContinuousIntegrationBuild=true -p:Version=${{ env.VERSION }} -p:PackageVersion=${{ env.VERSION }}
 
-      - name: Test (unit + integration)
-        # Run tests before publishing. Integration tests use Testcontainers.MsSql.
-        # MTP syntax is required (see global.json "test.runner").
-        run: dotnet test --solution NSLabs.EFCore.Extensions.slnx --no-build --configuration Release -p:Version=${{ env.VERSION }}
+      - name: Test (unit + integration, net10.0)
+        # Run tests for both target frameworks before publishing. Integration
+        # tests use Testcontainers.MsSql/PostgreSql. MTP syntax is required
+        # (see global.json "test.runner").
+        run: >-
+          dotnet test --solution NSLabs.EFCore.Extensions.slnx
+          --no-build --configuration Release --framework net10.0
+          -p:Version=${{ env.VERSION }}
+
+      - name: Test (unit + integration, net11.0)
+        run: >-
+          dotnet test --solution NSLabs.EFCore.Extensions.slnx
+          --no-build --configuration Release --framework net11.0
+          -p:Version=${{ env.VERSION }}
 
       - name: Pack
         run: |

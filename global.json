@@ -1,4 +1,10 @@
 {
+  // .NET 11 SDK is the default for builds; net10.0 remains a target and is
+  // covered by its own CI job. rollForward keeps patch/feature-band updates.
+  "sdk": {
+    "version": "11.0.100",
+    "rollForward": "latestFeature"
+  },
   // .NET 10 SDK: opt in to the Microsoft.Testing.Platform-based `dotnet test`
   // experience. Required by xUnit.net v3 4.x (MTP v2): the VSTest target is no
   // longer supported when MTP v2 is referenced.
