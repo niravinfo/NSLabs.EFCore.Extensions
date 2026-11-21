@@ -41,7 +41,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # Benchmarks run on net10.0; the project now multi-targets, so both SDKs are needed.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore
         run: dotnet restore benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj
@@ -58,6 +61,7 @@ jobs:
           dotnet run
           --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
           --configuration Release
+          --framework net10.0
           --no-build
           --
           --filter "$BDN_FILTER"
