@@ -135,4 +135,20 @@ public class UpdateGoldenSqlTests
         Assert.Equal(3, p["@p1"]);
         Assert.Equal("Cat", p["@p2"]);
     }
+
+    [Fact]
+    public void Captured_conversion_in_predicate_keeps_original_parameter_type()
+    {
+        int capturedInt = 3;
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b
+            .Update<AuditLog>(op => op
+                .Where(x => x.Id > (long)capturedInt)
+                .Set(x => x.Created, new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc))));
+
+        // Translators strip captured Convert nodes before Evaluate; this is pre-P2 behavior.
+        var p = Harness.Params(parameters);
+        Assert.IsType<int>(p["@p1"]);
+        Assert.Equal(3, p["@p1"]);
+    }
 }

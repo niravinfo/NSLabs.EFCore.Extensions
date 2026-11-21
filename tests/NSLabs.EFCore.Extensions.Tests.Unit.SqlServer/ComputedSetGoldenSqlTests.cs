@@ -478,4 +478,20 @@ public class ComputedSetGoldenSqlTests
         Assert.Contains("THEN ([Key2] + @p", sql);
         Assert.Contains("ELSE ([Key2] - @p", sql);
     }
+
+    [Fact]
+    public void Captured_conversion_in_set_expression_keeps_original_parameter_type()
+    {
+        double capturedDouble = 2.9;
+
+        var (sql, parameters) = Harness.GenerateSingle(b => b
+            .Update<Order>(op => op
+                .Where(x => x.OrderNo == "O-1")
+                .Set(x => x.Amount, x => x.Amount + (decimal)(int)capturedDouble)));
+
+        // Translators strip captured Convert nodes before Evaluate; this is pre-P2 behavior.
+        var p = Harness.Params(parameters);
+        Assert.IsType<double>(p["@p0"]);
+        Assert.Equal(2.9, p["@p0"]);
+    }
 }
