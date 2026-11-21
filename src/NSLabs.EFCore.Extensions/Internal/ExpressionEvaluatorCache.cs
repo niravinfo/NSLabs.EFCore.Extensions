@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -197,15 +198,26 @@ internal static class ExpressionEvaluatorCache
     {
         // Keep the lambda's natural return type: adding Expression.Convert(object)
         // makes compilation itself more expensive than the DynamicInvoke it avoids.
+        // Only compilation is retried — invoking must happen exactly once.
+        Delegate compiled;
         try
         {
-            var lambda = Expression.Lambda(expression);
-            return lambda.Compile().DynamicInvoke();
+            compiled = Expression.Lambda(expression).Compile();
         }
         catch
         {
             var converted = Expression.Convert(expression, typeof(object));
-            return Expression.Lambda<Func<object?>>(converted).Compile()();
+            compiled = Expression.Lambda<Func<object?>>(converted).Compile();
+        }
+
+        try
+        {
+            return compiled.DynamicInvoke();
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
         }
     }
 }

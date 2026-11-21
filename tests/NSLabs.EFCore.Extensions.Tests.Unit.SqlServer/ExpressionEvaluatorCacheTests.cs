@@ -140,6 +140,31 @@ public class ExpressionEvaluatorCacheTests
             Expression.AndAlso(Expression.Constant(false), thrower))!);
     }
 
+    [Fact]
+    public void Evaluate_compile_fallback_invokes_throwing_expression_once()
+    {
+        var counter = new ThrowCounter();
+        var call = Expression.Call(
+            Expression.Constant(counter),
+            typeof(ThrowCounter).GetMethod(nameof(ThrowCounter.Fail))!);
+
+        var exception = Assert.Throws<InvalidOperationException>(() => ExpressionEvaluatorCache.Evaluate(call));
+
+        Assert.Equal("boom", exception.Message);
+        Assert.Equal(1, counter.Calls);
+    }
+
+    private sealed class ThrowCounter
+    {
+        public int Calls { get; private set; }
+
+        public int Fail()
+        {
+            Calls++;
+            throw new InvalidOperationException("boom");
+        }
+    }
+
     private static bool Throw() => throw new InvalidOperationException("must not be evaluated");
 
     private readonly record struct Money(int Amount)
