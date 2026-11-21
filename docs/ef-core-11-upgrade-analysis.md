@@ -97,9 +97,26 @@ generate its DML — it emits its own SQL from expression trees:
 
 - Restore/build: both TFMs, 0 errors, no NU warnings.
 - Unit tests: 194 SQL Server + 89 SQLite + 64 Npgsql = 347 per TFM, all pass.
-- SQLite integration tests: 46 per TFM, all pass.
+- Integration tests (Docker running): SQL Server 84 + PostgreSQL 26 + SQLite 46
+  = 156 per TFM, all pass on both TFMs.
 - `dotnet pack`: `lib/net10.0` + `lib/net11.0` assets in all four packages;
   nuspec shows EF 10.0.15 vs 11.0.0 per TFM group.
-- Not verified: SQL Server/PostgreSQL integration tests (Docker daemon unavailable
-  in this environment; the fixtures use `mssql/server:2022-latest` and
-  `postgres:17`, both compatible with the new defaults).
+
+## 7. Issues found during container-based verification
+
+Both surfaced only on `net11.0`; neither was an EF 11 regression.
+
+1. `MathMinMaxExecutionTests.Default_ef_compat_throws_for_min` — the same
+   default-compat premise as the golden-SQL test. On EF 11 the default is 160,
+   so no exception is raised. Split per TFM: `net10.0` still asserts the
+   actionable `NotSupportedException`; `net11.0` now seeds a row and asserts the
+   cap is actually applied (`Key2` 50 → 10).
+2. `UpsertExecutionTests.Composite_conflict_target_matches_all_columns_before_updating`
+   — failed with a duplicate PK on `Id = 9701` during seeding. Cause:
+   `EntityStyleExecutionTests` seeds the same fixed IDs (9701/9702) into the
+   same shared fixture database. Both classes are in the `sqlserver` xUnit
+   collection (serialised), so the outcome depended on which ran first; the
+   isolated test passed and running both together reproduced the failure on
+   both TFMs. Fixed by clearing those two IDs before seeding. This was a
+   pre-existing order-dependent test-isolation bug that the TFM ordering
+   happened to expose.

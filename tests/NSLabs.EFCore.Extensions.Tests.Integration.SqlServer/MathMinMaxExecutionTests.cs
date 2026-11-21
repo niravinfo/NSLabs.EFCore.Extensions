@@ -20,6 +20,37 @@ public class MathMinMaxExecutionTests : SqlServerTestBase
         return new IntegrationTestDbContext(options);
     }
 
+#if NET11_0
+    [Fact]
+    public async Task Default_ef_compat_applies_min()
+    {
+        // EF Core 11 defaults UseSqlServer to compatibility level 160, so LEAST is
+        // available without an explicit UseCompatibilityLevel call.
+        RequireDatabase();
+        const int id = 20203;
+
+        await using (var cleanup = Fixture.CreateContext())
+        {
+            await cleanup.Items.Where(x => x.Id == id).ExecuteDeleteAsync();
+        }
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            seed.Items.Add(new Item { Id = id, Key2 = 50 });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var context = Fixture.CreateContext())
+        {
+            var result = await context.BulkExecuteAsync(b => b
+                .Update<Item>(op => op.Where(x => x.Id == id).Set(x => x.Key2, x => Math.Min(x.Key2, 10))));
+            Assert.Equal(1, result.TotalRowsAffected);
+        }
+
+        await using var verify = Fixture.CreateContext();
+        Assert.Equal(10, (await verify.Items.AsNoTracking().SingleAsync(x => x.Id == id)).Key2);
+    }
+#else
     [Fact]
     public async Task Default_ef_compat_throws_for_min()
     {
@@ -28,6 +59,7 @@ public class MathMinMaxExecutionTests : SqlServerTestBase
         await Assert.ThrowsAsync<NotSupportedException>(() => context.BulkExecuteAsync(b => b
             .Update<Item>(op => op.Where(x => x.Id == 1).Set(x => x.Key2, x => Math.Min(x.Key2, 10)))));
     }
+#endif
 
     [Fact]
     public async Task Min_applies_cap_hit_and_cap_miss()
