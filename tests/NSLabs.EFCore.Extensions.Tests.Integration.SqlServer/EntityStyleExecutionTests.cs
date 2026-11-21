@@ -90,6 +90,11 @@ public class EntityStyleExecutionTests : SqlServerTestBase
         var createdAt = new DateTime(2026, 9, 25, 0, 0, 0, DateTimeKind.Utc);
         var cancellationToken = TestContext.Current.CancellationToken;
 
+        await using (var cleanup = Fixture.CreateContext())
+        {
+            await cleanup.Items.ExecuteDeleteAsync(cancellationToken);
+        }
+
         await using (var seed = Fixture.CreateContext())
         {
             seed.Items.Add(new Item { Id = firstId, Key1 = "p3-shared", Key2 = 1, Key3 = 10, CreatedAt = createdAt });

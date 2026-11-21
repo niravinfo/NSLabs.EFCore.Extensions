@@ -171,7 +171,7 @@ public class EntityRowMatchPlanTests
         AssertPlanMatchesReference(context, (row, x) => x.Id == row.Id || x.Key1 == row.Key1, new Item { Id = 1, Key1 = "a" });
 
         // Relational against a null value: no IS NULL rewrite, the raw parameter is kept.
-        AssertPlanMatchesReference(context, (row, x) => x.Key2 < row.Key2, new Item { Key2 = 0 });
+        AssertPlanMatchesReference(context, (row, x) => x.ParentId > row.ParentId, new Item { ParentId = null });
     }
 
     [Fact]

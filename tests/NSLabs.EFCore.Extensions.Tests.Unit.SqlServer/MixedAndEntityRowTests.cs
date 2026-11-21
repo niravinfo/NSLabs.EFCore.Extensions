@@ -171,7 +171,7 @@ public class MixedAndEntityRowTests
     }
 
     [Fact]
-    public void Entity_rows_with_relational_custom_match_use_general_fallback_semantics()
+    public void Entity_rows_with_relational_custom_match_preserve_relational_semantics()
     {
         var row = new Item
         {
@@ -203,7 +203,7 @@ public class MixedAndEntityRowTests
     }
 
     [Fact]
-    public void Entity_rows_with_or_custom_match_preserve_general_fallback_grouping()
+    public void Entity_rows_with_or_custom_match_preserve_or_grouping()
     {
         var row = new Customer { Id = 100, Code = "A", Name = "X", Active = true };
 
