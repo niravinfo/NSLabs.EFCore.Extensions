@@ -80,4 +80,49 @@ public class EntityStyleExecutionTests : SqlServerTestBase
         Assert.False(customer.Active);
         Assert.Equal(seededId, customer.Id);
     }
+
+    [Fact]
+    public async Task Composite_entity_row_custom_match_requires_every_term_and_preserves_per_row_counts()
+    {
+        RequireDatabase();
+        const int firstId = 9701;
+        const int secondId = 9702;
+        var createdAt = new DateTime(2026, 9, 25, 0, 0, 0, DateTimeKind.Utc);
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await using (var seed = Fixture.CreateContext())
+        {
+            seed.Items.Add(new Item { Id = firstId, Key1 = "p3-shared", Key2 = 1, Key3 = 10, CreatedAt = createdAt });
+            seed.Items.Add(new Item { Id = secondId, Key1 = "p3-shared", Key2 = 2, Key3 = 20, CreatedAt = createdAt });
+            await seed.SaveChangesAsync(cancellationToken);
+        }
+
+        var detachedRows = new[]
+        {
+            new Item { Id = 10701, Key1 = "p3-shared", Key2 = 1, Key3 = 101, CreatedAt = createdAt },
+            new Item { Id = 10702, Key1 = "p3-shared", Key2 = 2, Key3 = 202, CreatedAt = createdAt }
+        };
+
+        BulkExecuteResult result;
+        await using (var context = Fixture.CreateContext())
+        {
+            result = await context.BulkExecuteAsync(
+                b => b.Update<Item>(detachedRows, (row, x) => x.Key1 == row.Key1 && row.Key2 == x.Key2),
+                cancellationToken);
+        }
+
+        Assert.Equal(2, result.TotalRowsAffected);
+        Assert.Collection(
+            result.Operations,
+            operation => Assert.Equal(1, operation.RowsAffected),
+            operation => Assert.Equal(1, operation.RowsAffected));
+
+        await using var verify = Fixture.CreateContext();
+        var items = await verify.Items.AsNoTracking()
+            .Where(x => x.Id == firstId || x.Id == secondId)
+            .OrderBy(x => x.Id)
+            .ToListAsync(cancellationToken);
+        Assert.Equal(101, items[0].Key3);
+        Assert.Equal(202, items[1].Key3);
+    }
 }

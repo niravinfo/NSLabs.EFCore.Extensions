@@ -109,4 +109,24 @@ public class SqliteUpdateGoldenSqlTests
         Assert.Contains("\"Items\"", chunks[0].CommandText);
         Assert.Contains("\"Orders\"", chunks[1].CommandText);
     }
+
+    [Fact]
+    public void Entity_rows_with_composite_custom_match_preserve_mixed_operand_order()
+    {
+        var row = new Customer { Id = 100, Code = "A", Name = "X", Active = true };
+
+        var (sql, parameters) = SqliteHarness.GenerateSingle(b => b.Update<Customer>(
+            [row],
+            (matchRow, x) => x.Code == matchRow.Code && (matchRow.Name == x.Name && x.Active == matchRow.Active)));
+
+        Assert.Equal(
+            "UPDATE \"Customers\" SET \"Active\" = @p0, \"Code\" = @p1, \"Name\" = @p2 " +
+            "WHERE (\"Code\" = @p3 AND (@p4 = \"Name\" AND \"Active\" = @p5));",
+            sql);
+
+        var p = SqliteHarness.Params(parameters);
+        Assert.Equal("A", p["@p3"]);
+        Assert.Equal("X", p["@p4"]);
+        Assert.Equal(true, p["@p5"]);
+    }
 }
