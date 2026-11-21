@@ -201,3 +201,26 @@ Takeaways:
 | BindAndGenerateUpdateStatements | 10000     | 50,304.61 us | 74,424.62 us | 4,079.465 us | 4000.0000 | 2500.0000 | 1500.0000 | 56158.76 KB |
 
 </details>
+
+---
+
+## CapturedValueBenchmarks (direct evaluation A/B, 2026-11-21)
+
+Six caller-realistic shapes, measured locally on Windows with `job=Short`,
+.NET SDK 11.0.100, before (`6f729af`) and after the direct-evaluation change.
+Both runs used the identical benchmark file. Local timings are directional;
+`Allocated` is deterministic.
+
+| Method (10,000 ops)        | Mean before | Mean after | Speedup | Allocated before | Allocated after | Δ Alloc |
+|----------------------------|------------:|-----------:|--------:|-----------------:|----------------:|--------:|
+| BindCapturedConstant       |    28,263 us |  23,184 us |   1.2x  |     21,273.89 KB |     21,273.74 KB | ~0     |
+| BindCapturedArithmetic     | 1,076,894 us |  35,678 us |  30.2x  |     74,638.41 KB |     31,820.71 KB | -57%   |
+| BindCapturedStringConcat   |    28,436 us |  24,555 us |   1.2x  |     22,748.78 KB |     22,748.57 KB | ~0     |
+| BindInterpolatedString     |    26,190 us |  23,238 us |   1.1x  |     21,117.59 KB |     21,117.50 KB | ~0     |
+| BindCapturedMethodArgument |   874,434 us |  37,347 us |  23.4x  |     75,089.98 KB |     33,999.05 KB | -55%   |
+| BindCapturedDecimalFactor  | 1,207,417 us |  34,883 us |  34.6x  |     74,005.95 KB |     30,804.57 KB | -58%   |
+
+Arithmetic, method arguments and decimal factors used to compile a lambda per
+operation; they now evaluate operands directly and call a delegate compiled once
+per operator shape. Constants, string concat and interpolated strings were never
+on the compile path and are unchanged within noise.
