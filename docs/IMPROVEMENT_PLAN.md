@@ -138,7 +138,7 @@ benchmarks/
 - Benchmarks (P1) show reduced bind time and allocations for repeated predicate/SET shapes.
 - Cache is bounded or keyed on stable expression identity (no unbounded growth per `DbContext` model rebuild — note the existing caveat on `ModelBinder` static caches).
 
-**Depends on:** P1 (to measure). Status: DONE — `ExpressionEvaluatorCache` (getter + operator + comparer caches; `ConditionalWeakTable` compile fallback); tests green; A/B on same hardware (EPYC 7763, `benchmarks/Baseline_New.md` vs `benchmarks/New_Improvements.md`): captured-subexpression SET bind **37–50× faster / −57% alloc**, closure compile fallback **54–76× faster / −64% alloc**, no regressions anywhere else.
+**Depends on:** P1 (to measure). Status: DONE — `ExpressionEvaluatorCache` caches compiled member getters and default comparers, with a weak-keyed compile fallback for rare operator/conditional shapes; the pre-change compile-per-call path is eliminated for captured subtrees. The pre-optimization baseline is in `benchmarks/BASELINE.md`; the predicate-side A/B figures are not captured in this repository and are not claimed here. Captured `Convert`/`ConvertChecked` nodes continue to be stripped by the translators before evaluation, preserving pre-P2 SQL parameter types.
 
 ---
 
