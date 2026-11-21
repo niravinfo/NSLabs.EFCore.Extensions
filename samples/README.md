@@ -71,7 +71,7 @@ Minimal console host for SQL Server:
 
 ## Requirements
 
-- .NET 10 SDK
+- .NET 10 or .NET 11 SDK (samples build for both target frameworks)
 - SQL Server (LocalDB, Express, Docker or a full installation). The database is dropped and recreated from the current model on every run, so repeats need no extra setup.
 
 ### Option 1: LocalDB (Windows, no configuration)
