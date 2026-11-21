@@ -17,6 +17,12 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
+  <!-- Runtime async is opt-in per assembly. EF Core 11 enables it for its net11.0 build,
+       so do the same here; net10.0 keeps compiler-generated state machines. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net11.0'">
+    <Features>$(Features);runtime-async=on</Features>
+  </PropertyGroup>
+
   <ItemGroup Condition="'$(IsPackable)' != 'false'">
     <None Include="$(MSBuildThisFileDirectory)NUGET_README.md" Pack="true" PackagePath="/README.md" />
   </ItemGroup>
