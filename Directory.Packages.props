@@ -4,20 +4,8 @@
     <CentralPackageTransitivePinningEnabled>false</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
 
+  <!-- Version-independent packages: one version for both target frameworks. -->
   <ItemGroup>
-    <!-- EF Core - direct references only. Kept on the 10.x wave; .NET 11 support is planned separately. -->
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.4" />
-
-    <!-- Hosting / Configuration / Logging - direct references only. Kept in sync with EF Core 10.x. -->
-    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.15" />
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
-
     <!-- Test - direct references only.
          xUnit.net v3 (defaults to Microsoft.Testing.Platform v2 in 4.x, MTP-native).
          No VSTest packages: MTP v2 blocks the VSTest target on .NET 10 SDK. -->
@@ -32,5 +20,33 @@
 
     <!-- Benchmarks only: never referenced from src/* or tests/*. -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+  <!-- EF Core 10 / .NET 10 wave. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.15" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.4" />
+
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.15" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
+  </ItemGroup>
+
+  <!-- EF Core 11 / .NET 11 wave. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="11.0.0" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="11.0.0" />
+
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="11.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0" />
   </ItemGroup>
 </Project>
