@@ -28,6 +28,10 @@ permissions:
 jobs:
   publish:
     name: Pack and Publish to NuGet
+    # Gated by the "Production" environment (Settings -> Environments), which requires
+    # approval before this job starts. The nuget.org Trusted Publishing policy must also
+    # use Environment = Production, otherwise the OIDC login step will fail.
+    environment: Production
     runs-on: ubuntu-latest
 
     steps:
