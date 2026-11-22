@@ -2,8 +2,13 @@
 
 Captured 2026-11-21 via the `benchmarks.yml` GitHub Actions workflow
 ([run #44888459274](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44888459274),
-`job=Short`, `filter=*`). This is the current reference for A/B comparisons.
-Full raw results are in the `benchmark-results-44888459274` action artifact (90-day retention).
+`job=Short`, `filter=*`). Full raw results are in the `benchmark-results-44888459274`
+action artifact (90-day retention).
+
+For code-vs-code comparisons, use the same-runner A/B section below
+([run #44988502240](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44988502240)).
+Numbers from separate workflow runs are not comparable because GitHub assigns a
+different physical runner each time.
 
 ## Environment
 
@@ -15,7 +20,8 @@ Full raw results are in the `benchmark-results-44888459274` action artifact (90-
 
 Comparison rules (same as `benchmarks/README.md`):
 
-- Only compare runs from this workflow (same ubuntu runner image).
+- For A/B, compare `candidate/` and `baseline/` from one workflow run — same job, same runner.
+- Never compare numbers from separate workflow runs, even with the same image label.
 - Never compare against local Windows runs.
 - On shared runners, trust `Allocated` more than `Mean` (timings are noisy).
 
@@ -116,10 +122,11 @@ from ~2x in the previous baseline.
 
 ---
 
-## Comparison vs. previous baseline (pre-optimization, 2026-09-23)
+## Historical: pre-optimization comparison (2026-09-23)
 
-Representative largest workload per benchmark. `Mean` deltas are indicative only
-because of the runner/runtime change (see note above); `Allocated` is the reliable signal.
+Superseded by the same-runner A/B section below. Kept for context only: the two
+sides of this table ran on different runner hardware, so its `Mean` column is not
+evidence of a code change. `Allocated` is still useful.
 
 | Benchmark (largest case)              | Mean: old → new             | Δ Mean  | Allocated: old → new        | Δ Alloc |
 |-------------------------------------- |---------------------------- |--------:|---------------------------- |--------:|
@@ -224,3 +231,58 @@ Arithmetic, method arguments and decimal factors used to compile a lambda per
 operation; they now evaluate operands directly and call a delegate compiled once
 per operator shape. Constants, string concat and interpolated strings were never
 on the compile path and are unchanged within noise.
+
+---
+
+## Same-runner A/B: latest main vs direct evaluation (2026-11-22)
+
+Authoritative code-vs-code comparison from [run #44988502240](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44988502240),
+using the same-runner A/B workflow with `job=Short` and `filter=*`. Both revisions
+were restored, built and benchmarked sequentially in one job on one `ubuntu-26.04`
+runner:
+
+- `candidate/` -- latest main, `4064604`
+- `baseline/` -- perf branch, `60481b5` (PR #30)
+
+The workflow file lives on the CI branch, so the run was dispatched there with
+`baseline_ref=perf/benchmark-regression`. Product code on the candidate side is
+main; only workflow and docs differ.
+
+Environment: BenchmarkDotNet 0.15.8, Ubuntu 26.04.1 LTS, Intel Xeon Platinum
+8573C @ 3.10 GHz, .NET SDK 11.0.100 / .NET 10.0.15, ShortRun (3 iterations,
+3 warmups). This is a different CPU from the baseline capture above, which is
+exactly why comparisons have to come from a single run.
+
+### Paths that changed
+
+| Benchmark | Ops | main | perf branch | Speedup | Alloc main | Alloc perf | Change |
+|-----------|----:|-----:|------------:|--------:|-----------:|-----------:|-------:|
+| Predicate / closure fallback | 10 | 1,027.3 us | 16.1 us | 63.8x | 69.6 KB | 24.4 KB | -65% |
+| Predicate / closure fallback | 1000 | 106,472.5 us | 1,896.5 us | 56.1x | 7,121.1 KB | 2,430.2 KB | -66% |
+| Predicate / closure fallback | 10000 | 1,020,687.4 us | 25,068.3 us | 40.7x | 69,560.9 KB | 24,397.0 KB | -65% |
+| SetExpression / captured subexpression | 10 | 617.9 us | 25.6 us | 24.1x | 74.8 KB | 31.9 KB | -57% |
+| SetExpression / captured subexpression | 1000 | 59,764.1 us | 2,339.6 us | 25.5x | 7,462.3 KB | 3,172.5 KB | -58% |
+| SetExpression / captured subexpression | 10000 | 607,407.0 us | 32,306.6 us | 18.8x | 74,717.2 KB | 31,818.9 KB | -57% |
+
+### Everything else
+
+The remaining 30 benchmark cases were within noise of 1.0x with identical
+allocations. Largest case per class:
+
+| Benchmark | Ops | main | perf branch | Allocated (both) |
+|-----------|----:|-----:|------------:|-----------------:|
+| Predicate / comparison | 10000 | 32,792.1 us | 31,244.1 us | 30,178.2 KB |
+| Predicate / StartsWith | 10000 | 32,705.7 us | 28,268.6 us | ~23,000 KB |
+| SetExpression / arithmetic | 10000 | 40,295.9 us | 37,806.3 us | ~29,000 KB |
+| SqliteExecute / UpdateWhere | 1000 | 6,819.8 us | 6,977.9 us | 4,679.9 KB |
+| SqliteExecute / PK match | 1000 | 6,190.6 us | 6,307.1 us | 3,352.0 KB |
+| SqliteExecute / large In list | 1000 | 451.6 us | 460.4 us | 66.4 KB |
+| EntityRowMatch / PK match | 10000 | 18,111.6 us | 18,458.4 us | 20,299.0 KB |
+| EntityRowMatch / custom match | 10000 | 21,760.8 us | 21,291.0 us | 22,589.0 KB |
+| LargeInList | 20000 | 1,521.0 us | 1,703.0 us | 1,355.2 KB |
+| SqlGeneration / update statements | 10000 | 67,771.3 us | 65,628.7 us | 54,127.6 KB |
+
+`BindCapturedConstant`, `BindCapturedStringConcat` and `BindInterpolatedString`
+from `CapturedValueBenchmarks` exist only on the perf branch, so they could not be
+part of this A/B. Their local Windows numbers are in the previous section; they
+never compiled a lambda per operation and were unchanged there too.
