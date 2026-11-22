@@ -21,8 +21,9 @@ machine GitHub happened to assign. The runner image is pinned to `ubuntu-26.04`.
 This repo is public, so standard runners are free and unlimited.
 
 Results upload as the `benchmark-ab-*` artifact (CSV/HTML/GitHub-md, 90-day retention)
-with two folders: `BenchmarkDotNet.Artifacts/` for the candidate and
-`baseline/BenchmarkDotNet.Artifacts/` for the baseline.
+with two folders: `candidate/BenchmarkDotNet.Artifacts/` for the candidate and
+`baseline/BenchmarkDotNet.Artifacts/` for the baseline. Both checkouts are siblings
+so BenchmarkDotNet sees only one benchmark project per run.
 
 Comparison rules:
 - Compare the two folders from the same run; never compare numbers from separate runs.

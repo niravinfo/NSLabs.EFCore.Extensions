@@ -42,6 +42,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          path: candidate
 
       - name: Checkout baseline
         uses: actions/checkout@v7
@@ -55,7 +57,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore (candidate)
-        working-directory: .
+        working-directory: candidate
         run: dotnet restore benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj
 
       - name: Restore (baseline)
@@ -63,7 +65,7 @@ jobs:
         run: dotnet restore benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj
 
       - name: Build (Release, candidate)
-        working-directory: .
+        working-directory: candidate
         run: dotnet build benchmarks/NSLabs.EFCore.Extensions.Benchmarks/NSLabs.EFCore.Extensions.Benchmarks.csproj --no-restore --configuration Release
 
       - name: Build (Release, baseline)
@@ -72,7 +74,7 @@ jobs:
 
       # Inputs flow through env vars to avoid shell injection via --filter.
       - name: Run benchmarks (candidate)
-        working-directory: .
+        working-directory: candidate
         env:
           BDN_FILTER: ${{ inputs.filter }}
           BDN_JOB: ${{ inputs.job }}
@@ -105,7 +107,7 @@ jobs:
         with:
           name: benchmark-ab-${{ github.run_id }}
           path: |
-            BenchmarkDotNet.Artifacts/
+            candidate/BenchmarkDotNet.Artifacts/
             baseline/BenchmarkDotNet.Artifacts/
           if-no-files-found: warn
           retention-days: 90
