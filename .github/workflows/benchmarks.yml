@@ -25,10 +25,18 @@ on:
           - Short
           - Default
       framework:
-        description: "Target framework to benchmark"
+        description: "Target framework for the candidate"
         type: choice
         required: true
         default: net11.0
+        options:
+          - net11.0
+          - net10.0
+      baseline_framework:
+        description: "Target framework for the baseline"
+        type: choice
+        required: true
+        default: net10.0
         options:
           - net11.0
           - net10.0
@@ -108,7 +116,7 @@ jobs:
         env:
           BDN_FILTER: ${{ inputs.filter }}
           BDN_JOB: ${{ inputs.job }}
-          BDN_FRAMEWORK: ${{ inputs.framework }}
+          BDN_FRAMEWORK: ${{ inputs.baseline_framework }}
         run: >
           dotnet run
           --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
