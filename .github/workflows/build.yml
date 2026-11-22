@@ -11,7 +11,48 @@ permissions:
 
 jobs:
   build:
-    name: Build / Test / Pack
+    name: Build / Test (${{ matrix.framework }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [net10.0, net11.0]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          # global.json selects 11.0.x as the default SDK; 10.0.x is installed
+          # so the net10.0 target and its runtime are available to the matrix job.
+          dotnet-version: |
+            10.0.x
+            11.0.x
+
+      - name: Restore
+        run: dotnet restore NSLabs.EFCore.Extensions.slnx
+
+      - name: Build (Release, ${{ matrix.framework }})
+        run: >-
+          dotnet build NSLabs.EFCore.Extensions.slnx
+          --no-restore --configuration Release
+          -p:TargetFramework=${{ matrix.framework }}
+
+      - name: Test (${{ matrix.framework }})
+        # Unit and integration tests for this framework only. xUnit.net v3 runs
+        # on Microsoft.Testing.Platform (see global.json "test.runner").
+        # Integration tests use Testcontainers.MsSql/PostgreSql; Docker is
+        # available on ubuntu-latest. When it is unavailable they self-skip.
+        run: >-
+          dotnet test --solution NSLabs.EFCore.Extensions.slnx
+          --no-build --configuration Release
+          --framework ${{ matrix.framework }}
+
+  pack:
+    name: Pack (verify packaging)
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
@@ -21,20 +62,15 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore
         run: dotnet restore NSLabs.EFCore.Extensions.slnx
 
-      - name: Build (Release)
+      - name: Build (Release, all frameworks)
         run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release
-
-      - name: Test
-        # Runs both unit and integration tests (xUnit.net v3 on Microsoft.Testing.Platform;
-        # runner is selected via the "test.runner" setting in global.json, so MTP syntax is required).
-        # Integration tests use Testcontainers.MsSql — Docker is available on ubuntu-latest.
-        # If Docker is unavailable they are skipped via Assert.Skip (xUnit.v3).
-        run: dotnet test --solution NSLabs.EFCore.Extensions.slnx --no-build --configuration Release
 
       - name: Pack (verify packaging)
         run: dotnet pack NSLabs.EFCore.Extensions.slnx --no-build --configuration Release --output ./artifacts

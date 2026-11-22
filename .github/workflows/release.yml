@@ -1,22 +1,24 @@
 name: Release
 
 # Trigger when a GitHub Release is published (manually created via GitHub UI).
-# This is the intended flow: create a new Release in the repository -> this workflow
-# builds, publishes to NuGet via OIDC Trusted Publishing, and attaches the .nupkg files
-# as separate assets to that same GitHub Release.
+# This workflow builds, publishes to NuGet via OIDC Trusted Publishing, and attaches
+# the .nupkg files as separate assets to that same GitHub Release.
+# A manual dispatch packs and tests by default without publishing; set publish=true
+# to push to NuGet and attach the packages to the v<version> release.
 on:
   release:
     types: [published]
-  # Optional: allow manual re-run from the Actions tab for debugging.
-  # When dispatched manually, provide `version` input (e.g. 1.2.3) and the workflow
-  # will pack with that version but will NOT automatically attach to a GitHub Release
-  # (use the `release` trigger for that).
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g., 1.2.3). Only used for manual dispatch."
+        description: "Version to pack (e.g., 1.2.3). Only used for manual dispatch."
         required: false
         type: string
+      publish:
+        description: "Push to NuGet and attach to the GitHub Release (manual dispatch only)"
+        required: false
+        default: false
+        type: boolean
 
 # Permissions required:
 # - id-token: write  -> to request the OIDC token for NuGet Trusted Publishing
@@ -38,7 +40,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # Multi-targeted solution: net10.0 and net11.0 both need their SDK/runtime.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Determine package version
         id: version
@@ -81,16 +86,42 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved package version: $VERSION"
 
+      - name: Resolve publish mode
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "PUBLISH=true" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=${{ github.event.release.tag_name }}" >> "$GITHUB_ENV"
+            echo "Mode: publish and attach to the published release"
+          elif [ "${{ inputs.publish }}" = "true" ]; then
+            echo "PUBLISH=true" >> "$GITHUB_ENV"
+            echo "RELEASE_TAG=v${{ env.VERSION }}" >> "$GITHUB_ENV"
+            echo "Mode: publish and attach to release v${{ env.VERSION }}"
+          else
+            echo "PUBLISH=false" >> "$GITHUB_ENV"
+            echo "Mode: dry run (pack and test only)"
+          fi
+
       - name: Restore
         run: dotnet restore NSLabs.EFCore.Extensions.slnx
 
       - name: Build (Release)
         run: dotnet build NSLabs.EFCore.Extensions.slnx --no-restore --configuration Release -p:ContinuousIntegrationBuild=true -p:Version=${{ env.VERSION }} -p:PackageVersion=${{ env.VERSION }}
 
-      - name: Test (unit + integration)
-        # Run tests before publishing. Integration tests use Testcontainers.MsSql.
-        # MTP syntax is required (see global.json "test.runner").
-        run: dotnet test --solution NSLabs.EFCore.Extensions.slnx --no-build --configuration Release -p:Version=${{ env.VERSION }}
+      - name: Test (unit + integration, net10.0)
+        # Run tests for both target frameworks before publishing. Integration
+        # tests use Testcontainers.MsSql/PostgreSql. MTP syntax is required
+        # (see global.json "test.runner").
+        run: >-
+          dotnet test --solution NSLabs.EFCore.Extensions.slnx
+          --no-build --configuration Release --framework net10.0
+          -p:Version=${{ env.VERSION }}
+
+      - name: Test (unit + integration, net11.0)
+        run: >-
+          dotnet test --solution NSLabs.EFCore.Extensions.slnx
+          --no-build --configuration Release --framework net11.0
+          -p:Version=${{ env.VERSION }}
 
       - name: Pack
         run: |
@@ -102,12 +133,14 @@ jobs:
 
       # Docs: https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing
       - name: NuGet login (OIDC → temp API key)
+        if: env.PUBLISH == 'true'
         uses: NuGet/login@v1
         id: login
         with:
           user: ${{ secrets.NUGET_USER }}
 
       - name: Push to NuGet
+        if: env.PUBLISH == 'true'
         run: |
           # The temp API key from NuGet/login is valid for 1 hour and single-use.
           # --skip-duplicate makes the step idempotent if the same version was already pushed.
@@ -117,12 +150,13 @@ jobs:
             --skip-duplicate
 
       # Attach every .nupkg (and .snupkg if produced) as a separate asset on the
-      # GitHub Release that triggered this workflow. Users can then download them
-      # directly from the Release page in addition to restoring from NuGet.
+      # target GitHub Release. Users can then download them directly from the
+      # Release page in addition to restoring from NuGet.
       - name: Attach packages to GitHub Release
-        if: github.event_name == 'release'
+        if: env.PUBLISH == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             ./artifacts/*.nupkg
             ./artifacts/*.snupkg

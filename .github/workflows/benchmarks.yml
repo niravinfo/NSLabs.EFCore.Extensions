@@ -24,6 +24,22 @@ on:
           - Dry
           - Short
           - Default
+      framework:
+        description: "Target framework for the candidate"
+        type: choice
+        required: true
+        default: net11.0
+        options:
+          - net11.0
+          - net10.0
+      baseline_framework:
+        description: "Target framework for the baseline"
+        type: choice
+        required: true
+        default: net11.0
+        options:
+          - net11.0
+          - net10.0
 
 # Queue runs - parallel benchmark jobs would skew timings.
 concurrency:
@@ -50,11 +66,17 @@ jobs:
         with:
           ref: ${{ inputs.baseline_ref }}
           path: baseline
+          # A commit SHA baseline_ref needs full history to resolve.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # Benchmarks default to net11.0; both SDKs are installed so the
+          # framework input can select either target.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore (candidate)
         working-directory: candidate
@@ -78,10 +100,12 @@ jobs:
         env:
           BDN_FILTER: ${{ inputs.filter }}
           BDN_JOB: ${{ inputs.job }}
+          BDN_FRAMEWORK: ${{ inputs.framework }}
         run: >
           dotnet run
           --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
           --configuration Release
+          --framework "$BDN_FRAMEWORK"
           --no-build
           --
           --filter "$BDN_FILTER"
@@ -92,10 +116,12 @@ jobs:
         env:
           BDN_FILTER: ${{ inputs.filter }}
           BDN_JOB: ${{ inputs.job }}
+          BDN_FRAMEWORK: ${{ inputs.baseline_framework }}
         run: >
           dotnet run
           --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
           --configuration Release
+          --framework "$BDN_FRAMEWORK"
           --no-build
           --
           --filter "$BDN_FILTER"

@@ -185,10 +185,24 @@ public class MathMinMaxGoldenSqlTests
         Assert.DoesNotContain("GREATEST([s].[Amount]", sql);
     }
 
+#if NET11_0
+    [Fact]
+    public void Default_compat_160_emits_least()
+    {
+        // EF Core 11 defaults UseSqlServer to compatibility level 160, so LEAST is
+        // supported on the default path — no actionable exception is expected.
+        var (sql, _) = Harness.GenerateSingle(
+            b => b.Update<Item>(op => op
+                .Where(x => x.Id == 1)
+                .Set(x => x.Key2, x => Math.Min(x.Key2, 10))));
+
+        Assert.Contains("LEAST([Key2], @p0)", sql);
+    }
+#else
     [Fact]
     public void Default_compat_throws_with_actionable_message()
     {
-        // EF Core default is 150 — below the 160 required for LEAST.
+        // EF Core 10 default is 150 — below the 160 required for LEAST.
         var ex = Assert.Throws<NotSupportedException>(() => Harness.GenerateSingle(
             b => b.Update<Item>(op => op
                 .Where(x => x.Id == 1)
@@ -199,6 +213,7 @@ public class MathMinMaxGoldenSqlTests
         Assert.Contains("COMPATIBILITY_LEVEL", ex.Message);
         Assert.Contains("LEAST", ex.Message);
     }
+#endif
 
     [Fact]
     public void Compat_159_throws_but_160_and_170_emit()

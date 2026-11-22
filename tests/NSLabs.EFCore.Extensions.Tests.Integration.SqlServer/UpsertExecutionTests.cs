@@ -102,6 +102,13 @@ public class UpsertExecutionTests(SqlServerFixture fixture) : SqlServerTestBase(
     {
         RequireDatabase();
 
+        // EntityStyleExecutionTests uses the same fixed IDs against the shared fixture database.
+        // Clear them first so this test does not depend on which class xUnit runs first.
+        await using (var cleanup = Fixture.CreateContext())
+        {
+            await cleanup.Items.Where(x => x.Id == 9701 || x.Id == 9702).ExecuteDeleteAsync();
+        }
+
         await using (var seed = Fixture.CreateContext())
         {
             seed.Items.Add(new Item { Id = 9701, Key1 = "dup", Key2 = 1, Key3 = 0 });

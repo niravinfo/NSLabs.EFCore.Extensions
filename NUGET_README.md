@@ -6,6 +6,7 @@
 [![NuGet Downloads](https://img.shields.io/nuget/dt/NSLabs.EFCore.Extensions.svg)](https://www.nuget.org/packages/NSLabs.EFCore.Extensions/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/niravinfo/NSLabs.EFCore.Extensions/blob/main/LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![.NET 11](https://img.shields.io/badge/.NET-11-512BD4.svg)](https://dotnet.microsoft.com/download/dotnet/11.0)
 
 Batched conditional bulk update / upsert for Entity Framework Core. It runs *N different* `WHERE` + `SET` operations in one round-trip with sequential semantics (later operations see earlier writes). Transactions are caller-controlled.
 
@@ -17,7 +18,9 @@ This library runs `N` heterogeneous `UPDATE`, `UPSERT` and `DELETE` operations a
 
 ## Installation
 
-Requirements: `.NET 10` and `Microsoft.EntityFrameworkCore` `10.x.x`
+Targets both `.NET 10` (with `Microsoft.EntityFrameworkCore` `10.x.x`) and `.NET 11` (with `Microsoft.EntityFrameworkCore` `11.x.x`). NuGet selects the matching build automatically.
+
+> **SQL Server compatibility:** EF Core 11 defaults `UseSqlServer` to compatibility level 160 (SQL Server 2022), so `Math.Min`/`Math.Max` inside `Set(...)` translate to `LEAST`/`GREATEST`. EF Core 10 defaults to 150 and throws an actionable exception instead. If your database is older than SQL Server 2022, set `UseCompatibilityLevel(150)` explicitly.
 
 Choose a provider package.
 

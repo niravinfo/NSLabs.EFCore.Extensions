@@ -14,6 +14,8 @@ The workflow is manual only; it never runs on push or pull requests. In Actions,
 | `baseline_ref` | Git ref to measure as the baseline | `main` |
 | `filter` | BDN `--filter`, e.g. `*EntityRowMatch*` | `*` (all) |
 | `job` | `Dry` (smoke) / `Short` (CI A/B) / `Default` (thorough) | `Short` |
+| `framework` | Target framework for the candidate | `net11.0` |
+| `baseline_framework` | Target framework for the baseline | `net11.0` |
 
 The ref you dispatch is the candidate. Both revisions are built and measured in one
 job on the same runner with the same SDK, so the comparison does not depend on which
