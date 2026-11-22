@@ -11,13 +11,21 @@ The workflow is manual only; it never runs on push or pull requests. In Actions,
 
 | Input | Meaning | Default |
 |-------|---------|---------|
+| `baseline_ref` | Git ref to measure as the baseline | `main` |
 | `filter` | BDN `--filter`, e.g. `*EntityRowMatch*` | `*` (all) |
 | `job` | `Dry` (smoke) / `Short` (CI A/B) / `Default` (thorough) | `Short` |
 
-Results upload as the `benchmark-results-*` artifact (CSV/HTML/GitHub-md, 90-day retention).
+The ref you dispatch is the candidate. Both revisions are built and measured in one
+job on the same runner with the same SDK, so the comparison does not depend on which
+machine GitHub happened to assign. The runner image is pinned to `ubuntu-26.04`.
+This repo is public, so standard runners are free and unlimited.
+
+Results upload as the `benchmark-ab-*` artifact (CSV/HTML/GitHub-md, 90-day retention)
+with two folders: `BenchmarkDotNet.Artifacts/` for the candidate and
+`baseline/BenchmarkDotNet.Artifacts/` for the baseline.
 
 Comparison rules:
-- Only compare runs from this workflow (same ubuntu runner image).
+- Compare the two folders from the same run; never compare numbers from separate runs.
 - Never compare against local Windows runs.
 - On shared runners, trust `Allocated` more than `Mean` (timings are noisy).
 
