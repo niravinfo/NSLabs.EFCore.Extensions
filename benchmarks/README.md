@@ -69,8 +69,8 @@ Pass-through BenchmarkDotNet options (e.g. `--memory`, exporters, jobs) work aft
 
 ## Baseline workflow
 
-1. Capture a baseline before an optimization (run the GitHub workflow with `job=Short`, or locally with the same filter).
-2. Apply the change.
-3. Re-run the same filter and job, then compare the Mean and Allocated columns.
+1. Have the baseline commit available on a branch or tag on GitHub (usually `main`).
+2. Dispatch the `Benchmarks` workflow on the branch with your change, setting `baseline_ref` to that baseline and using the same `filter` and `job` for both sides.
+3. Download the `benchmark-ab-*` artifact and compare the Mean and Allocated columns in `candidate/` against `baseline/`. Both were measured in the same job on the same runner.
 
 CI (`build.yml`) only compile-checks this project; the `benchmarks.yml` workflow is the only place it executes.
