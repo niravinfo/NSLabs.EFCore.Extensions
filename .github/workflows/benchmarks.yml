@@ -106,10 +106,12 @@ jobs:
         env:
           BDN_FILTER: ${{ inputs.filter }}
           BDN_JOB: ${{ inputs.job }}
+          BDN_FRAMEWORK: ${{ inputs.framework }}
         run: >
           dotnet run
           --project benchmarks/NSLabs.EFCore.Extensions.Benchmarks
           --configuration Release
+          --framework "$BDN_FRAMEWORK"
           --no-build
           --
           --filter "$BDN_FILTER"
