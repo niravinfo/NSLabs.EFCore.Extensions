@@ -58,6 +58,8 @@ jobs:
         with:
           ref: ${{ inputs.baseline_ref }}
           path: baseline
+          # A commit SHA baseline_ref needs full history to resolve.
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
