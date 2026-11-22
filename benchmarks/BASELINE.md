@@ -1,16 +1,15 @@
-# Benchmark Baseline (main @ a0ad624)
+# Benchmark Baseline
 
-Captured 2026-11-21 via the `benchmarks.yml` GitHub Actions workflow
-([run #44888459274](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44888459274),
-`job=Short`, `filter=*`). Full raw results are in the `benchmark-results-44888459274`
-action artifact (90-day retention).
+The tables below come from [run #44888459274](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44888459274),
+`job=Short`, `filter=*`, on `main` at `a0ad624`. Raw CSV, HTML and Markdown
+reports are in the `benchmark-results-44888459274` artifact.
 
-For code-vs-code comparisons, use the same-runner A/B section below
+For comparing code changes, use the same-runner A/B at the bottom of this file
 ([run #44988502240](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44988502240)).
-Numbers from separate workflow runs are not comparable because GitHub assigns a
-different physical runner each time.
+Two separate workflow runs land on different machines, so their timings cannot
+be compared.
 
-## Environment
+## Environment for run #44888459274
 
 - BenchmarkDotNet v0.15.8
 - Linux Ubuntu 26.04.1 LTS (Resolute Raccoon)
@@ -18,24 +17,24 @@ different physical runner each time.
 - .NET SDK 11.0.100 / .NET 10.0.15, X64 RyuJIT x86-64-v4
 - Job: `ShortRun` (IterationCount=3, LaunchCount=1, WarmupCount=3)
 
-Comparison rules (same as `benchmarks/README.md`):
+Comparison rules:
 
-- For A/B, compare `candidate/` and `baseline/` from one workflow run — same job, same runner.
-- Never compare numbers from separate workflow runs, even with the same image label.
-- Never compare against local Windows runs.
-- On shared runners, trust `Allocated` more than `Mean` (timings are noisy).
+- For A/B, use the `candidate/` and `baseline/` folders from one workflow run.
+- Do not compare numbers from separate runs, even with the same image label.
+- Do not compare against local Windows runs.
+- Trust `Allocated` more than `Mean`; timings on shared runners move around.
 
-> Note: this run's runner image (Ubuntu 26.04 vs 24.04), CPU (9V74 @ 3.69GHz vs
-> 9V45 @ 4.35GHz) and runtime (10.0.15 / SDK 11.0.100 vs 10.0.12 / SDK 10.0.401)
-> differ from the previous baseline. Per the rules above, `Mean` deltas are not
-> reliably attributable to code changes — use `Allocated` for A/B decisions.
+> The earlier baseline ran on Ubuntu 24.04 with an EPYC 9V45 at 4.35 GHz and
+> .NET 10.0.12. This run used Ubuntu 26.04, an EPYC 9V74 at 3.69 GHz and
+> .NET 10.0.15. That changes the `Mean` column on its own, so the two sets of
+> timings are not comparable. `Allocated` still is.
 
-All six benchmark classes were captured this time, including
-`Bind.PredicateTranslationBenchmarks`, which was missing from the previous baseline.
+`PredicateTranslationBenchmarks` was left out of the previous baseline write-up,
+though its report was in the artifact. It is included below.
 
 ---
 
-## PredicateTranslationBenchmarks (newly captured)
+## PredicateTranslationBenchmarks
 
 | Method                     | Operations | Mean            | Error         | StdDev       | Gen0      | Gen1      | Gen2      | Allocated   |
 |----------------------------|-----------:|----------------:|--------------:|-------------:|----------:|----------:|----------:|------------:|
@@ -65,7 +64,7 @@ All six benchmark classes were captured this time, including
 | BindComputedColumnArithmetic          | 10000      |   26,090.78 us |  3,389.19 us |   185.773 us | 1875.0000 | 1093.7500 |  562.5000 | 28304.21 KB |
 | BindComputedWithCapturedSubexpression | 10000      | 1,149,639.47 us | 28,446.29 us | 1,559.237 us | 4000.0000 | 2000.0000 | 1000.0000 | 74924.01 KB |
 
-Captured-subexpression binding remains the slow path: ~44x slower than
+Captured-subexpression binding was the slow path in this run: ~44x slower than
 arithmetic-only binding at 10k operations, with ~2.6x the allocations.
 
 ---
@@ -124,9 +123,9 @@ from ~2x in the previous baseline.
 
 ## Historical: pre-optimization comparison (2026-09-23)
 
-Superseded by the same-runner A/B section below. Kept for context only: the two
-sides of this table ran on different runner hardware, so its `Mean` column is not
-evidence of a code change. `Allocated` is still useful.
+This table compares two runs that landed on different machines. Its `Mean`
+column is not usable; `Allocated` still is. The section below has the newer
+numbers.
 
 | Benchmark (largest case)              | Mean: old → new             | Δ Mean  | Allocated: old → new        | Δ Alloc |
 |-------------------------------------- |---------------------------- |--------:|---------------------------- |--------:|
@@ -141,16 +140,13 @@ evidence of a code change. `Allocated` is still useful.
 | SqlGeneration / UpdateStatements (10k) | 50,304.61 → 58,026.81 us | +15%    | 56158.76 → 54910.86 KB     | -2.2%   |
 | PredicateTranslation                 | not captured previously    | —       | newly captured above       | —       |
 
-Takeaways:
+What we took from this table at the time:
 
-- The only clear allocation reduction is `EntityRowMatch / CustomMatch`
-  (~27% less, ~36% lower Mean at 10k rows), consistent with
-  "Hoist entity row match plan and add cross-provider tests" (#26).
-- Allocations elsewhere are flat to ~2% lower; the broadly higher `Mean` values
-  track the slower new runner CPU rather than a code-level regression.
-- `BindComputedWithCapturedSubexpression` shows the largest `Mean` increase
-  (3x at 10k) despite flat allocations — re-check on a pinned runner before
-  treating that as a real regression.
+- `EntityRowMatch / CustomMatch` was the one clear allocation drop, about 27%
+  less at 10k rows, from the hoisted match plan in #26.
+- Other allocation changes were small, a couple of percent at most.
+- The jump in `BindComputedWithCapturedSubexpression` was runner drift, not a
+  code regression. The same-runner A/B below has the real numbers.
 
 <details>
 <summary>Previous baseline tables (pre-optimization, 2026-09-23, run environment: Ubuntu 24.04.5 / EPYC 9V45 4.35GHz / .NET 10.0.12)</summary>
@@ -213,10 +209,10 @@ Takeaways:
 
 ## CapturedValueBenchmarks (direct evaluation A/B, 2026-11-21)
 
-Six caller-realistic shapes, measured locally on Windows with `job=Short`,
-.NET SDK 11.0.100, before (`6f729af`) and after the direct-evaluation change.
-Both runs used the identical benchmark file. Local timings are directional;
-`Allocated` is deterministic.
+Six shapes taken from the README, samples and golden-SQL tests. Both sides ran
+locally on Windows with `job=Short` and .NET SDK 11.0.100, using the same
+benchmark file. Before is `6f729af`, after is the direct-evaluation change.
+Local timings are directional. Only `Allocated` is reliable here.
 
 | Method (10,000 ops)        | Mean before | Mean after | Speedup | Allocated before | Allocated after | Δ Alloc |
 |----------------------------|------------:|-----------:|--------:|-----------------:|----------------:|--------:|
@@ -234,24 +230,22 @@ on the compile path and are unchanged within noise.
 
 ---
 
-## Same-runner A/B: latest main vs direct evaluation (2026-11-22)
+## Same-runner A/B, 2026-11-22
 
-Authoritative code-vs-code comparison from [run #44988502240](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44988502240),
-using the same-runner A/B workflow with `job=Short` and `filter=*`. Both revisions
-were restored, built and benchmarked sequentially in one job on one `ubuntu-26.04`
-runner:
+[Run #44988502240](https://github.com/niravinfo/NSLabs.EFCore.Extensions/actions/runs/44988502240)
+ran both revisions in one job on one `ubuntu-26.04` runner, `job=Short`,
+`filter=*`:
 
-- `candidate/` -- latest main, `4064604`
-- `baseline/` -- perf branch, `60481b5` (PR #30)
+- `candidate/` is current main, `4064604`
+- `baseline/` is the perf branch, `60481b5`
 
-The workflow file lives on the CI branch, so the run was dispatched there with
-`baseline_ref=perf/benchmark-regression`. Product code on the candidate side is
-main; only workflow and docs differ.
+The workflow file is on the CI branch, so the run was dispatched there with
+`baseline_ref=perf/benchmark-regression`. The candidate has main's product code;
+the CI branch only adds workflow and docs.
 
-Environment: BenchmarkDotNet 0.15.8, Ubuntu 26.04.1 LTS, Intel Xeon Platinum
-8573C @ 3.10 GHz, .NET SDK 11.0.100 / .NET 10.0.15, ShortRun (3 iterations,
-3 warmups). This is a different CPU from the baseline capture above, which is
-exactly why comparisons have to come from a single run.
+Runner this time: BenchmarkDotNet 0.15.8, Ubuntu 26.04.1 LTS, Intel Xeon
+Platinum 8573C @ 3.10 GHz, .NET SDK 11.0.100 / .NET 10.0.15, ShortRun with
+3 iterations and 3 warmups.
 
 ### Paths that changed
 
@@ -266,23 +260,22 @@ exactly why comparisons have to come from a single run.
 
 ### Everything else
 
-The remaining 30 benchmark cases were within noise of 1.0x with identical
-allocations. Largest case per class:
+The other 30 cases stayed around 1.0x with the same allocations. Largest case
+in each class:
 
-| Benchmark | Ops | main | perf branch | Allocated (both) |
-|-----------|----:|-----:|------------:|-----------------:|
-| Predicate / comparison | 10000 | 32,792.1 us | 31,244.1 us | 30,178.2 KB |
-| Predicate / StartsWith | 10000 | 32,705.7 us | 28,268.6 us | ~23,000 KB |
-| SetExpression / arithmetic | 10000 | 40,295.9 us | 37,806.3 us | ~29,000 KB |
-| SqliteExecute / UpdateWhere | 1000 | 6,819.8 us | 6,977.9 us | 4,679.9 KB |
-| SqliteExecute / PK match | 1000 | 6,190.6 us | 6,307.1 us | 3,352.0 KB |
-| SqliteExecute / large In list | 1000 | 451.6 us | 460.4 us | 66.4 KB |
-| EntityRowMatch / PK match | 10000 | 18,111.6 us | 18,458.4 us | 20,299.0 KB |
-| EntityRowMatch / custom match | 10000 | 21,760.8 us | 21,291.0 us | 22,589.0 KB |
-| LargeInList | 20000 | 1,521.0 us | 1,703.0 us | 1,355.2 KB |
-| SqlGeneration / update statements | 10000 | 67,771.3 us | 65,628.7 us | 54,127.6 KB |
+| Benchmark | Ops | main | perf branch | Alloc main / perf |
+|-----------|----:|-----:|------------:|------------------:|
+| Predicate / comparison | 10000 | 32,792.1 us | 31,244.1 us | 30,178.2 / 30,178.2 KB |
+| Predicate / StartsWith | 10000 | 32,705.7 us | 28,268.6 us | 23,537.5 / 22,443.8 KB |
+| SetExpression / arithmetic | 10000 | 40,295.9 us | 37,806.3 us | 29,084.6 / 29,397.2 KB |
+| SqliteExecute / UpdateWhere | 1000 | 6,819.8 us | 6,977.9 us | 4,679.9 / 4,679.9 KB |
+| SqliteExecute / PK match | 1000 | 6,190.6 us | 6,307.1 us | 3,352.0 / 3,352.0 KB |
+| SqliteExecute / large In list | 1000 | 451.6 us | 460.4 us | 66.4 / 66.5 KB |
+| EntityRowMatch / PK match | 10000 | 18,111.6 us | 18,458.4 us | 20,299.0 / 20,298.5 KB |
+| EntityRowMatch / custom match | 10000 | 21,760.8 us | 21,291.0 us | 22,589.0 / 22,589.0 KB |
+| LargeInList | 20000 | 1,521.0 us | 1,703.0 us | 1,355.2 / 1,355.2 KB |
+| SqlGeneration / update statements | 10000 | 67,771.3 us | 65,628.7 us | 54,127.6 / 54,127.3 KB |
 
-`BindCapturedConstant`, `BindCapturedStringConcat` and `BindInterpolatedString`
-from `CapturedValueBenchmarks` exist only on the perf branch, so they could not be
-part of this A/B. Their local Windows numbers are in the previous section; they
-never compiled a lambda per operation and were unchanged there too.
+`CapturedValueBenchmarks` only exists on the perf branch, so it is not in this
+A/B. Its Windows numbers are above; the three cases that used to compile a
+lambda per operation improved there as well.
