@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 
 namespace NSLabs.EFCore.Extensions.Internal;
 
@@ -11,7 +11,17 @@ internal static class ExpressionEvaluatorCache
 
     private static readonly ConcurrentDictionary<Type, object?> DefaultComparerCache = new();
 
-    private static readonly ConditionalWeakTable<Expression, Func<object?>> CompileCache = new();
+    // Keys are stable shape metadata, never expression instances or captured values:
+    // callers build a fresh expression tree for every bind.
+    private static readonly ConcurrentDictionary<UnaryShape, Func<object?, object?>> UnaryCache = new();
+
+    private static readonly ConcurrentDictionary<BinaryShape, Func<object?, object?, object?>> BinaryCache = new();
+
+    private readonly record struct UnaryShape(
+        ExpressionType Node, Type Operand, Type Result, MethodInfo? Method, bool IsLiftedToNull);
+
+    private readonly record struct BinaryShape(
+        ExpressionType Node, Type Left, Type Right, Type Result, MethodInfo? Method, bool IsLiftedToNull);
 
     public static object? Evaluate(Expression expression)
     {
@@ -21,6 +31,10 @@ internal static class ExpressionEvaluatorCache
                 return constant.Value;
             case MemberExpression member:
                 return EvaluateMember(member);
+            case UnaryExpression unary:
+                return EvaluateUnary(unary);
+            case BinaryExpression binary:
+                return EvaluateBinary(binary);
             case NewArrayExpression newArray:
             {
                 var elementType = newArray.Type.GetElementType() ?? typeof(object);
@@ -63,9 +77,6 @@ internal static class ExpressionEvaluatorCache
 
                 return newExpression.Constructor.Invoke(args);
             }
-            // Operators, conversions and conditionals are rare in captured subtrees.
-            // Compile them once per expression instance (weakly held) instead of
-            // duplicating C# operator semantics here.
             default:
                 return CompileAndEvaluate(expression);
         }
@@ -120,14 +131,93 @@ internal static class ExpressionEvaluatorCache
         return Expression.Lambda<Func<object?, object?>>(boxed, instanceParam).Compile();
     }
 
+    private static object? EvaluateUnary(UnaryExpression unary)
+    {
+        var operand = Evaluate(unary.Operand);
+        var shape = new UnaryShape(
+            unary.NodeType, unary.Operand.Type, unary.Type, unary.Method, unary.IsLiftedToNull);
+        var evaluate = UnaryCache.GetOrAdd(shape, static s => CompileUnary(s));
+        return evaluate(operand);
+    }
+
+    private static Func<object?, object?> CompileUnary(UnaryShape shape)
+    {
+        var operand = Expression.Parameter(typeof(object), "operand");
+        Expression body = Expression.MakeUnary(
+            shape.Node,
+            Expression.Convert(operand, shape.Operand),
+            shape.Result,
+            shape.Method);
+
+        if (body.Type != typeof(object))
+        {
+            body = Expression.Convert(body, typeof(object));
+        }
+
+        return Expression.Lambda<Func<object?, object?>>(body, operand).Compile();
+    }
+
+    private static object? EvaluateBinary(BinaryExpression binary)
+    {
+        // Short-circuit and coalesce need their runtime semantics (and coalesce's
+        // conversion lambda), so those stay on the compile path.
+        if (binary.NodeType is ExpressionType.Coalesce or ExpressionType.AndAlso
+            or ExpressionType.OrElse or ExpressionType.ArrayIndex)
+        {
+            return CompileAndEvaluate(binary);
+        }
+
+        var left = Evaluate(binary.Left);
+        var right = Evaluate(binary.Right);
+        var shape = new BinaryShape(
+            binary.NodeType, binary.Left.Type, binary.Right.Type, binary.Type, binary.Method, binary.IsLiftedToNull);
+        var evaluate = BinaryCache.GetOrAdd(shape, static s => CompileBinary(s));
+        return evaluate(left, right);
+    }
+
+    private static Func<object?, object?, object?> CompileBinary(BinaryShape shape)
+    {
+        var left = Expression.Parameter(typeof(object), "left");
+        var right = Expression.Parameter(typeof(object), "right");
+        Expression body = Expression.MakeBinary(
+            shape.Node,
+            Expression.Convert(left, shape.Left),
+            Expression.Convert(right, shape.Right),
+            shape.IsLiftedToNull,
+            shape.Method);
+
+        if (body.Type != typeof(object))
+        {
+            body = Expression.Convert(body, typeof(object));
+        }
+
+        return Expression.Lambda<Func<object?, object?, object?>>(body, left, right).Compile();
+    }
+
     private static object? CompileAndEvaluate(Expression expression)
     {
-        var compiled = CompileCache.GetValue(expression, static e =>
+        // Keep the lambda's natural return type: adding Expression.Convert(object)
+        // makes compilation itself more expensive than the DynamicInvoke it avoids.
+        // Only compilation is retried — invoking must happen exactly once.
+        Delegate compiled;
+        try
         {
-            var body = e.Type == typeof(object) ? e : Expression.Convert(e, typeof(object));
-            return Expression.Lambda<Func<object?>>(body).Compile();
-        });
+            compiled = Expression.Lambda(expression).Compile();
+        }
+        catch
+        {
+            var converted = Expression.Convert(expression, typeof(object));
+            compiled = Expression.Lambda<Func<object?>>(converted).Compile();
+        }
 
-        return compiled();
+        try
+        {
+            return compiled.DynamicInvoke();
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
     }
 }
